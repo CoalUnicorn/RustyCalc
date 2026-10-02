@@ -15,8 +15,8 @@ use iron_canvas_core::geometry::path::{Path, PathCmd, arc_segments};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
-    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    parse_font_size_px,
+    BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, Painter, StrokeStyle, TextAlign,
+    TextBaseline, TextMetrics, parse_font_size_px,
 };
 
 use crate::common::escape::xml_escape;
@@ -133,6 +133,67 @@ fn open_rect(rect: PixelRect, out: &mut String) {
     );
 }
 
+/// Append `path`'s commands as an SVG `d` attribute value. The caller must
+/// have validated `path`. Shared by `fill_path` and `stroke_path`.
+fn write_path_d(path: &Path<'_>, out: &mut String) {
+    for cmd in path.cmds() {
+        match cmd {
+            PathCmd::Move(p) => {
+                let _ = write!(out, "M{:.3} {:.3}", p.x, p.y);
+            }
+            PathCmd::Line(p) => {
+                let _ = write!(out, " L{:.3} {:.3}", p.x, p.y);
+            }
+            PathCmd::Quad(c, e) => {
+                let _ = write!(out, " Q{:.3} {:.3} {:.3} {:.3}", c.x, c.y, e.x, e.y);
+            }
+            PathCmd::Cubic(a, b, e) => {
+                let _ = write!(
+                    out,
+                    " C{:.3} {:.3} {:.3} {:.3} {:.3} {:.3}",
+                    a.x, a.y, b.x, b.y, e.x, e.y
+                );
+            }
+            PathCmd::Arc(spec) => {
+                if spec.sweep_angle == 0.0 {
+                    continue;
+                }
+                // A full turn has start == end, which one `A` cannot express;
+                // split into at most half-turn segments.
+                arc_segments(*spec, std::f64::consts::PI, |start, sweep| {
+                    let end = spec.point_at(start + sweep);
+                    let large = u8::from(sweep.abs() > std::f64::consts::PI);
+                    let sweep_flag = u8::from(sweep > 0.0);
+                    let _ = write!(
+                        out,
+                        " A{:.3} {:.3} 0 {} {} {:.3} {:.3}",
+                        spec.radius, spec.radius, large, sweep_flag, end.x, end.y
+                    );
+                });
+            }
+            PathCmd::Close => out.push('Z'),
+        }
+    }
+}
+
+/// SVG `stroke-linecap` value for a [`LineCap`].
+fn svg_cap(cap: LineCap) -> &'static str {
+    match cap {
+        LineCap::Butt => "butt",
+        LineCap::Round => "round",
+        LineCap::Square => "square",
+    }
+}
+
+/// SVG `stroke-linejoin` value for a [`LineJoin`].
+fn svg_join(join: LineJoin) -> &'static str {
+    match join {
+        LineJoin::Miter => "miter",
+        LineJoin::Round => "round",
+        LineJoin::Bevel => "bevel",
+    }
+}
+
 impl Painter for SvgPainter {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
         let mut body = self.body.borrow_mut();
@@ -175,47 +236,47 @@ impl Painter for SvgPainter {
         }
         let mut body = self.body.borrow_mut();
         body.push_str("<path d=\"");
-        for cmd in path.cmds() {
-            match cmd {
-                PathCmd::Move(p) => {
-                    let _ = write!(body, "M{:.3} {:.3}", p.x, p.y);
-                }
-                PathCmd::Line(p) => {
-                    let _ = write!(body, " L{:.3} {:.3}", p.x, p.y);
-                }
-                PathCmd::Quad(c, e) => {
-                    let _ = write!(body, " Q{:.3} {:.3} {:.3} {:.3}", c.x, c.y, e.x, e.y);
-                }
-                PathCmd::Cubic(a, b, e) => {
-                    let _ = write!(
-                        body,
-                        " C{:.3} {:.3} {:.3} {:.3} {:.3} {:.3}",
-                        a.x, a.y, b.x, b.y, e.x, e.y
-                    );
-                }
-                PathCmd::Arc(spec) => {
-                    if spec.sweep_angle == 0.0 {
-                        continue;
-                    }
-                    // A full turn has start == end, which one `A` cannot
-                    // express; split into at most half-turn segments.
-                    arc_segments(*spec, std::f64::consts::PI, |start, sweep| {
-                        let end = spec.point_at(start + sweep);
-                        let large = u8::from(sweep.abs() > std::f64::consts::PI);
-                        let sweep_flag = u8::from(sweep > 0.0);
-                        let _ = write!(
-                            body,
-                            " A{:.3} {:.3} 0 {} {} {:.3} {:.3}",
-                            spec.radius, spec.radius, large, sweep_flag, end.x, end.y
-                        );
-                    });
-                }
-                PathCmd::Close => body.push('Z'),
-            }
-        }
+        write_path_d(path, &mut body);
         body.push_str("\" fill=\"");
         xml_escape(color.as_str(), &mut body);
         body.push_str("\" fill-rule=\"nonzero\"/>");
+    }
+
+    /// SVG carries no graphics state between elements, so every stroke
+    /// attribute is written on this path: color, width, cap, join, miter
+    /// limit, and dash. `fill="none"` keeps the outline unfilled. A styled
+    /// path therefore cannot affect a later grid line, border, or underline.
+    fn stroke_path(&self, path: &Path<'_>, color: PaintColor, style: &StrokeStyle<'_>) {
+        if path.validate().is_err() || !style.is_valid() || path.is_empty() {
+            return;
+        }
+        let mut body = self.body.borrow_mut();
+        body.push_str("<path d=\"");
+        write_path_d(path, &mut body);
+        body.push_str("\" fill=\"none\" stroke=\"");
+        xml_escape(color.as_str(), &mut body);
+        let _ = write!(
+            body,
+            "\" stroke-width=\"{:.3}\" stroke-linecap=\"{}\" stroke-linejoin=\"{}\" \
+             stroke-miterlimit=\"{:.3}\"",
+            style.width,
+            svg_cap(style.cap),
+            svg_join(style.join),
+            style.miter_limit,
+        );
+        if style.dash.is_empty() {
+            body.push_str(" stroke-dasharray=\"none\"");
+        } else {
+            body.push_str(" stroke-dasharray=\"");
+            for (i, d) in style.dash.iter().enumerate() {
+                if i > 0 {
+                    body.push(' ');
+                }
+                let _ = write!(body, "{d:.3}");
+            }
+            body.push('"');
+        }
+        body.push_str("/>");
     }
 
     fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {

@@ -12,11 +12,11 @@ use iron_canvas_core::geometry::path::Path;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
-    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width, parse_font_size_px,
+    BlitPainter, GroupClass, PaintColor, Painter, StrokeStyle, TextAlign, TextBaseline,
+    TextMetrics, approx_text_width, parse_font_size_px,
 };
 
-use crate::ops::DrawOp;
+use crate::ops::{DrawOp, OwnedStrokeStyle};
 
 #[derive(Default)]
 pub struct RecorderPainter {
@@ -90,6 +90,14 @@ impl Painter for RecorderPainter {
         self.push(DrawOp::FillPath {
             path: path.cmds().to_vec(),
             color: color.as_str().to_string(),
+        });
+    }
+
+    fn stroke_path(&self, path: &Path<'_>, color: PaintColor, style: &StrokeStyle<'_>) {
+        self.push(DrawOp::StrokePath {
+            path: path.cmds().to_vec(),
+            color: color.as_str().to_string(),
+            style: OwnedStrokeStyle::from(style),
         });
     }
 

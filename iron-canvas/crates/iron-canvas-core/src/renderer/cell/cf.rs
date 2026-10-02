@@ -18,7 +18,7 @@ use std::rc::Rc;
 use crate::geometry::path::{Path, PathCmd, PointF};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::painter::{PaintColor, Painter};
+use crate::painter::{LineCap, LineJoin, PaintColor, Painter, StrokeStyle};
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::cache::color::{css_rgb, data_bar_rgb};
 use crate::style::{CellDecoration, IconGlyph};
@@ -466,21 +466,26 @@ impl<P: Painter + ?Sized> GlyphCanvas<'_, P> {
         }
     }
 
-    /// Fill a thick segment from `a` to `b` (unit coords) with `half`
-    /// half-thickness — a quad offset perpendicular to the segment.
+    /// Stroke the segment from `a` to `b` (unit coords) with `half`
+    /// half-thickness, as a butt-capped stroke of width `2 * half` scaled into
+    /// the glyph box. Butt caps reproduce the old perpendicular quad exactly,
+    /// so the appearance is unchanged; the segments stay independent until a
+    /// joined shape passes the phase-3 appearance check.
     fn segment(&self, a: (f64, f64), b: (f64, f64), half: f64) {
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let length = (dx * dx + dy * dy).sqrt();
-        if length <= f64::EPSILON {
+        if (dx * dx + dy * dy).sqrt() <= f64::EPSILON {
             return;
         }
-        let (px, py) = (-dy / length * half, dx / length * half);
-        self.poly(&[
-            (a.0 + px, a.1 + py),
-            (b.0 + px, b.1 + py),
-            (b.0 - px, b.1 - py),
-            (a.0 - px, a.1 - py),
-        ]);
+        let path = [PathCmd::Move(self.point(a)), PathCmd::Line(self.point(b))];
+        let style = StrokeStyle {
+            width: 2.0 * half * self.size,
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+            miter_limit: 10.0,
+            dash: &[],
+        };
+        self.painter
+            .stroke_path(&Path::new(&path), PaintColor::Borrowed(self.color), &style);
     }
 
     /// Fill a disc of `radius` (a unit-box fraction) centred in the glyph

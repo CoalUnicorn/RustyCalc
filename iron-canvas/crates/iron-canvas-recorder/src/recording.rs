@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v10)
+//! # On-disk layout (v11)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":10,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":11,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `10`). Mismatch -> load fails. |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `11`). Mismatch -> load fails. |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -84,10 +84,11 @@ use crate::DrawOp;
 /// with defaults don't bump). The loader rejects mismatched versions.
 ///
 /// v9 adds the `DrawOp::FillCircle` variant. v10 changes `DrawOp::FillPath`
-/// from integer `points` to a float `path` command list (curve support). An
-/// older reader rejects the file rather than dropping the op or misreading
-/// the shape geometry.
-pub const ICR_SCHEMA_VERSION: u32 = 10;
+/// from integer `points` to a float `path` command list (curve support). v11
+/// adds the `DrawOp::StrokePath` variant with an owned stroke style. An older
+/// reader rejects the file rather than dropping the op or misreading the shape
+/// geometry.
+pub const ICR_SCHEMA_VERSION: u32 = 11;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +357,13 @@ fn validate_ops(frame_index: usize, channel: &str, ops: &[DrawOp]) -> Result<(),
                     "frame {frame_index} {channel}: FillPath carries an invalid path",
                 )));
             }
+            DrawOp::StrokePath { path, style, .. }
+                if Path::new(path).validate().is_err() || !style.as_borrowed().is_valid() =>
+            {
+                return Err(IcrError::Format(format!(
+                    "frame {frame_index} {channel}: StrokePath carries an invalid path or style",
+                )));
+            }
             _ => {}
         }
         if !draw_op_numbers_are_finite(op) {
@@ -392,6 +400,11 @@ fn draw_op_numbers_are_finite(op: &DrawOp) -> bool {
         DrawOp::FillText { x, y, .. } => x.is_finite() && y.is_finite(),
         DrawOp::FillCircle { cx, cy, radius, .. } => {
             cx.is_finite() && cy.is_finite() && radius.is_finite()
+        }
+        DrawOp::StrokePath { style, .. } => {
+            style.width.is_finite()
+                && style.miter_limit.is_finite()
+                && style.dash.iter().all(|d| d.is_finite())
         }
         DrawOp::ApplyDprTransform { dpr } => dpr.is_finite() && *dpr > 0.0,
         DrawOp::RectFill { .. }

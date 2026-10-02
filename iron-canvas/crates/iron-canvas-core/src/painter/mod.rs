@@ -147,8 +147,57 @@ pub trait TextMetrics {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64;
 }
 
+/// How a stroke ends an open subpath or an independent segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineCap {
+    Butt,
+    Round,
+    Square,
+}
+
+/// How a stroke joins two segments of a subpath.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+/// Stroke appearance for [`Painter::stroke_path`].
+///
+/// `dash` is empty for a solid stroke. A nonempty pattern is in the same units
+/// as `width`, and its phase is zero. An odd-length pattern repeats twice to
+/// form an even pattern.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StrokeStyle<'a> {
+    pub width: f64,
+    pub cap: LineCap,
+    pub join: LineJoin,
+    pub miter_limit: f64,
+    pub dash: &'a [f64],
+}
+
+impl StrokeStyle<'_> {
+    /// `width` is finite and positive, `miter_limit` is finite and at least 1,
+    /// every dash entry is finite and nonnegative, and a nonempty dash pattern
+    /// has a finite positive sum (so an all-zero pattern is invalid).
+    pub fn is_valid(&self) -> bool {
+        self.width.is_finite()
+            && self.width > 0.0
+            && self.miter_limit.is_finite()
+            && self.miter_limit >= 1.0
+            && self.dash.iter().all(|d| d.is_finite() && *d >= 0.0)
+            && (self.dash.is_empty() || {
+                let sum: f64 = self.dash.iter().sum();
+                sum.is_finite() && sum > 0.0
+            })
+    }
+}
+
 #[diagnostic::on_unimplemented(
-    note = "implement the full `Painter` drawing surface (rect/circle/path fills, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
+    note = "implement the full `Painter` drawing surface (rect/circle/path fills and strokes, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
@@ -168,6 +217,17 @@ pub trait Painter: TextMetrics {
     /// curves, and circular arcs, so a shape reaches every backend as a
     /// curve. The existing [`Self::fill_circle`] primitive stays available.
     fn fill_path(&self, path: &Path<'_>, color: PaintColor);
+    /// Stroke the float path with `color` and `style`.
+    ///
+    /// A path invalid under [`Path::validate`] or a style invalid under
+    /// [`StrokeStyle::is_valid`] paints nothing. Stroke closes only subpaths
+    /// that carry a `Close`; an open subpath stays open.
+    ///
+    /// The call must not change how any later painter operation draws. The
+    /// implementation sets color, width, cap, join, miter limit, and dash for
+    /// this call only; a solid path installs an empty dash pattern explicitly.
+    /// Every call starts a fresh path.
+    fn stroke_path(&self, path: &Path<'_>, color: PaintColor, style: &StrokeStyle<'_>);
     /// Fill the circle centred at `(cx, cy)` with the given `radius`, both in
     /// logical pixels. A non-positive radius is a no-op. Every backend draws
     /// it with its own curve primitive (Canvas2D `arc`, SVG `<circle>`, PDF
@@ -243,5 +303,52 @@ impl CssColor {
 
     pub fn into_string(self) -> String {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod stroke_style_tests {
+    use super::*;
+
+    fn style(width: f64, miter_limit: f64, dash: &[f64]) -> StrokeStyle<'_> {
+        StrokeStyle {
+            width,
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+            miter_limit,
+            dash,
+        }
+    }
+
+    #[test]
+    fn solid_default_is_valid() {
+        assert!(style(2.0, 10.0, &[]).is_valid());
+    }
+
+    #[test]
+    fn nonpositive_or_nonfinite_width_is_invalid() {
+        assert!(!style(0.0, 10.0, &[]).is_valid());
+        assert!(!style(-1.0, 10.0, &[]).is_valid());
+        assert!(!style(f64::NAN, 10.0, &[]).is_valid());
+    }
+
+    #[test]
+    fn miter_limit_below_one_is_invalid() {
+        assert!(!style(1.0, 0.9, &[]).is_valid());
+        assert!(!style(1.0, f64::NAN, &[]).is_valid());
+    }
+
+    #[test]
+    fn dash_entries_must_be_finite_nonnegative() {
+        assert!(!style(1.0, 10.0, &[2.0, -1.0]).is_valid());
+        assert!(!style(1.0, 10.0, &[2.0, f64::INFINITY]).is_valid());
+    }
+
+    #[test]
+    fn all_zero_dash_is_invalid_but_positive_and_odd_patterns_are_valid() {
+        assert!(!style(1.0, 10.0, &[0.0, 0.0]).is_valid());
+        assert!(style(1.0, 10.0, &[3.0, 1.0]).is_valid());
+        // An odd-length pattern is valid; it repeats twice when rendered.
+        assert!(style(1.0, 10.0, &[4.0, 2.0, 1.0]).is_valid());
     }
 }

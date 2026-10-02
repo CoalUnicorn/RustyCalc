@@ -19,8 +19,8 @@ use iron_canvas_core::geometry::path::{Path, PathCmd, PointF, arc_to_cubics, qua
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
-    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    parse_font_size_px,
+    BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, Painter, StrokeStyle, TextAlign,
+    TextBaseline, TextMetrics, parse_font_size_px,
 };
 
 use crate::common::color::parse_css_color;
@@ -165,49 +165,12 @@ impl PdfPainter {
     fn emit_line(&self, x1: f64, y1: f64, x2: f64, y2: f64) {
         self.emit(format_args!("{x1:.3} {y1:.3} m\n{x2:.3} {y2:.3} l\nS\n"));
     }
-}
 
-impl TextMetrics for PdfPainter {
-    // `fill_text` below always draws the base-14 standard Helvetica font
-    // (`/F1`), regardless of the cell's declared family — PDF has no
-    // embedded-font path, so `helvetica_advance_width` is the font that's
-    // actually painted, not an approximation of it.
-    fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
-        let size = parse_font_size_px(font_css);
-        metrics::helvetica_advance_width(text, size)
-    }
-}
-
-impl Painter for PdfPainter {
-    fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
-        let (x, y, w, h) = rect.as_f64_tuple();
-        self.emit_fill_color(color);
-        self.emit_rect(x, y, w, h);
-        self.write_str("f\n");
-    }
-
-    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
-        let (x, y, w, h) = rect.as_f64_tuple();
-        if w <= 0.0 || h <= 0.0 {
-            return;
-        }
-        let index = self.shading_index(from.as_str(), to.as_str());
-        // The shading is defined over a unit axis (`/Coords [0 0 1 0]`), so
-        // clip to the bar rect in page space, then scale the unit axis onto
-        // the rect before `sh`. `q`/`Q` scopes both the clip and the CTM.
-        self.write_str("q\n");
-        self.emit_rect(x, y, w, h);
-        self.write_str("W n\n");
-        self.emit(format_args!("{w:.3} 0 0 1 {x:.3} 0 cm\n"));
-        self.emit(format_args!("/Sh{index} sh\n"));
-        self.write_str("Q\n");
-    }
-
-    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
-        if path.validate().is_err() || path.is_empty() {
-            return;
-        }
-        self.emit_fill_color(color);
+    /// Emit `path`'s construction ops (`m`/`l`/`c`/`h`), including the
+    /// shared quadratic and arc conversions. The caller must have validated
+    /// `path`; paint (`f` or `S`) is the caller's job. Shared by `fill_path`
+    /// and `stroke_path`.
+    fn emit_path(&self, path: &Path<'_>) {
         let mut cur: Option<PointF> = None;
         let mut subpath_start: Option<PointF> = None;
         for cmd in path.cmds() {
@@ -268,8 +231,102 @@ impl Painter for PdfPainter {
                 }
             }
         }
+    }
+}
+
+/// PDF `J` (line cap) code for a [`LineCap`].
+fn cap_code(cap: LineCap) -> u8 {
+    match cap {
+        LineCap::Butt => 0,
+        LineCap::Round => 1,
+        LineCap::Square => 2,
+    }
+}
+
+/// PDF `j` (line join) code for a [`LineJoin`].
+fn join_code(join: LineJoin) -> u8 {
+    match join {
+        LineJoin::Miter => 0,
+        LineJoin::Round => 1,
+        LineJoin::Bevel => 2,
+    }
+}
+
+impl TextMetrics for PdfPainter {
+    // `fill_text` below always draws the base-14 standard Helvetica font
+    // (`/F1`), regardless of the cell's declared family — PDF has no
+    // embedded-font path, so `helvetica_advance_width` is the font that's
+    // actually painted, not an approximation of it.
+    fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
+        let size = parse_font_size_px(font_css);
+        metrics::helvetica_advance_width(text, size)
+    }
+}
+
+impl Painter for PdfPainter {
+    fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
+        let (x, y, w, h) = rect.as_f64_tuple();
+        self.emit_fill_color(color);
+        self.emit_rect(x, y, w, h);
+        self.write_str("f\n");
+    }
+
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        let (x, y, w, h) = rect.as_f64_tuple();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let index = self.shading_index(from.as_str(), to.as_str());
+        // The shading is defined over a unit axis (`/Coords [0 0 1 0]`), so
+        // clip to the bar rect in page space, then scale the unit axis onto
+        // the rect before `sh`. `q`/`Q` scopes both the clip and the CTM.
+        self.write_str("q\n");
+        self.emit_rect(x, y, w, h);
+        self.write_str("W n\n");
+        self.emit(format_args!("{w:.3} 0 0 1 {x:.3} 0 cm\n"));
+        self.emit(format_args!("/Sh{index} sh\n"));
+        self.write_str("Q\n");
+    }
+
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
+        if path.validate().is_err() || path.is_empty() {
+            return;
+        }
+        self.emit_fill_color(color);
+        self.emit_path(path);
         // `f` fills every subpath and implicitly closes open ones.
         self.write_str("f\n");
+    }
+
+    /// `q`/`Q` scope the stroke state (color, width, cap, join, miter, dash),
+    /// so a styled path cannot leak a dash or a round cap into a later grid
+    /// line, border, or underline. PDF strokes an open subpath as open; `S`
+    /// closes nothing.
+    fn stroke_path(&self, path: &Path<'_>, color: PaintColor, style: &StrokeStyle<'_>) {
+        if path.validate().is_err() || !style.is_valid() || path.is_empty() {
+            return;
+        }
+        self.write_str("q\n");
+        self.emit_stroke_color(color);
+        self.emit_line_width(style.width);
+        self.emit(format_args!("{} J\n", cap_code(style.cap)));
+        self.emit(format_args!("{} j\n", join_code(style.join)));
+        self.emit(format_args!("{:.3} M\n", style.miter_limit));
+        if style.dash.is_empty() {
+            self.write_str("[] 0 d\n");
+        } else {
+            self.write_str("[");
+            for (i, d) in style.dash.iter().enumerate() {
+                if i > 0 {
+                    self.write_str(" ");
+                }
+                self.emit(format_args!("{d:.3}"));
+            }
+            self.write_str("] 0 d\n");
+        }
+        self.emit_path(path);
+        self.write_str("S\n");
+        self.write_str("Q\n");
     }
 
     fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {

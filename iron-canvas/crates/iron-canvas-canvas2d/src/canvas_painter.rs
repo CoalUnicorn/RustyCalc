@@ -19,8 +19,8 @@ use iron_canvas_core::geometry::{
     prim::{Line, Span},
 };
 use iron_canvas_core::painter::{
-    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width, parse_font_size_px,
+    BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, Painter, StrokeStyle, TextAlign,
+    TextBaseline, TextMetrics, approx_text_width, parse_font_size_px,
 };
 
 use crate::measure_cache::MeasureCache;
@@ -68,6 +68,24 @@ fn snap_stroke_cross(coord: f64, width: f64) -> f64 {
         coord.round()
     } else {
         coord.floor() + 0.5
+    }
+}
+
+/// Canvas `lineCap` value for a [`LineCap`].
+fn cap_str(cap: LineCap) -> &'static str {
+    match cap {
+        LineCap::Butt => "butt",
+        LineCap::Round => "round",
+        LineCap::Square => "square",
+    }
+}
+
+/// Canvas `lineJoin` value for a [`LineJoin`].
+fn join_str(join: LineJoin) -> &'static str {
+    match join {
+        LineJoin::Miter => "miter",
+        LineJoin::Round => "round",
+        LineJoin::Bevel => "bevel",
     }
 }
 
@@ -240,6 +258,50 @@ impl CanvasPainter {
         self.set_line_width_cached(f64::from(STANDARD_BORDER_WIDTH));
     }
 
+    /// Install a fresh ctx path from `path`. The caller must have validated
+    /// `path`. Shared by `fill_path` and `stroke_path` so both backends emit
+    /// the same command sequence.
+    fn build_path(&self, path: &Path<'_>) {
+        self.ctx.begin_path();
+        for cmd in path.cmds() {
+            match cmd {
+                PathCmd::Move(p) => self.ctx.move_to(p.x, p.y),
+                PathCmd::Line(p) => self.ctx.line_to(p.x, p.y),
+                PathCmd::Quad(c, e) => self.ctx.quadratic_curve_to(c.x, c.y, e.x, e.y),
+                PathCmd::Cubic(a, b, e) => {
+                    self.ctx.bezier_curve_to(a.x, a.y, b.x, b.y, e.x, e.y);
+                }
+                PathCmd::Arc(spec) => {
+                    if spec.sweep_angle == 0.0 {
+                        continue;
+                    }
+                    let _ = self.ctx.arc_with_anticlockwise(
+                        spec.center.x,
+                        spec.center.y,
+                        spec.radius,
+                        spec.start_angle,
+                        spec.start_angle + spec.sweep_angle,
+                        spec.sweep_angle < 0.0,
+                    );
+                }
+                PathCmd::Close => self.ctx.close_path(),
+            }
+        }
+    }
+
+    /// A `js_sys::Array` for `ctx.setLineDash`. An empty pattern reuses the
+    /// painter-lifetime empty array, so a solid stroke allocates nothing.
+    fn dash_array(&self, dash: &[f64]) -> js_sys::Array {
+        if dash.is_empty() {
+            return self.dash_empty.clone();
+        }
+        let arr = js_sys::Array::new_with_length(dash.len() as u32);
+        for (i, v) in dash.iter().enumerate() {
+            arr.set(i as u32, JsValue::from_f64(*v));
+        }
+        arr
+    }
+
     /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays
     /// zero-alloc; `Borrowed` is deduped through `interned_strings`, so a
     /// recurring color reuses its `Rc<str>` instead of reallocating. The font
@@ -354,38 +416,31 @@ impl Painter for CanvasPainter {
             return; // invalid path paints nothing
         }
         self.set_fill_cached(color);
-        self.ctx.begin_path();
-        for cmd in path.cmds() {
-            match cmd {
-                PathCmd::Move(p) => self.ctx.move_to(p.x, p.y),
-                PathCmd::Line(p) => self.ctx.line_to(p.x, p.y),
-                PathCmd::Quad(c, e) => self.ctx.quadratic_curve_to(c.x, c.y, e.x, e.y),
-                PathCmd::Cubic(a, b, e) => {
-                    self.ctx.bezier_curve_to(a.x, a.y, b.x, b.y, e.x, e.y);
-                }
-                PathCmd::Arc(spec) => {
-                    // A zero sweep has no effect on the path.
-                    if spec.sweep_angle == 0.0 {
-                        continue;
-                    }
-                    // Canvas `arc` runs counter-clockwise for `true`; a
-                    // negative sweep is the counter-clockwise direction in
-                    // this Y-down space. Canvas draws the connecting line to
-                    // the arc start when a current point exists, which matches
-                    // the D1 arc contract.
-                    let _ = self.ctx.arc_with_anticlockwise(
-                        spec.center.x,
-                        spec.center.y,
-                        spec.radius,
-                        spec.start_angle,
-                        spec.start_angle + spec.sweep_angle,
-                        spec.sweep_angle < 0.0,
-                    );
-                }
-                PathCmd::Close => self.ctx.close_path(),
-            }
-        }
+        self.build_path(path);
         self.ctx.fill();
+    }
+
+    /// Stroke state (color, width, cap, join, miter, dash) is installed inside
+    /// a `save`/`restore` pair, and the sticky setter cache is invalidated after
+    /// `restore` because it resets every one of those ctx properties. So a
+    /// styled path cannot leak a dash or a round cap into a later grid line,
+    /// border, or text underline.
+    fn stroke_path(&self, path: &Path<'_>, color: PaintColor, style: &StrokeStyle<'_>) {
+        if path.validate().is_err() || !style.is_valid() {
+            return;
+        }
+        self.ctx.save();
+        self.set_stroke_cached(color);
+        self.set_line_width_cached(style.width);
+        self.ctx.set_line_cap(cap_str(style.cap));
+        self.ctx.set_line_join(join_str(style.join));
+        self.ctx.set_miter_limit(style.miter_limit);
+        let dash = self.dash_array(style.dash);
+        let _ = self.ctx.set_line_dash(&dash);
+        self.build_path(path);
+        self.ctx.stroke();
+        self.ctx.restore();
+        self.setter_cache.invalidate();
     }
 
     fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {

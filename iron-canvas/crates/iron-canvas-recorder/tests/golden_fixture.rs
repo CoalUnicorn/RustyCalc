@@ -423,11 +423,11 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_10() {
+fn schema_version_is_pinned_at_11() {
     // Schema 8 added the RectFillHGradient operation; schema 9 added
-    // FillCircle; schema 10 changes FillPath from integer points to a float
-    // path command list.
-    assert_eq!(ICR_SCHEMA_VERSION, 10);
+    // FillCircle; schema 10 changed FillPath from integer points to a float
+    // path command list; schema 11 adds StrokePath with an owned stroke style.
+    assert_eq!(ICR_SCHEMA_VERSION, 11);
 }
 
 #[test]

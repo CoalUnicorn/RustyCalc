@@ -18,10 +18,12 @@
 #![allow(non_snake_case)]
 
 use iron_canvas_core::Orchestrator;
+use iron_canvas_core::geometry::path::{Path, PathCmd, PointF};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
-    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, Painter, StrokeStyle, TextAlign,
+    TextBaseline, TextMetrics,
 };
 use iron_canvas_core::surface::Surface;
 use iron_canvas_export::common::metrics;
@@ -369,6 +371,69 @@ fn finish_includes_painter_output_after_ctm() {
     assert!(
         cm_pos < re_pos,
         "painter ops emitted before page-open CTM (cm at {cm_pos}, re at {re_pos})"
+    );
+}
+
+#[test]
+fn stroke_path_emits_full_state_then_S() {
+    let p = PdfPainter::new(W, H);
+    p.stroke_path(
+        &Path::new(&[
+            PathCmd::Move(PointF::new(1.0, 2.0)),
+            PathCmd::Line(PointF::new(9.0, 8.0)),
+        ]),
+        PaintColor::Static("#ff0000"),
+        &StrokeStyle {
+            width: 2.5,
+            cap: LineCap::Round,
+            join: LineJoin::Bevel,
+            miter_limit: 4.0,
+            dash: &[3.0, 1.0],
+        },
+    );
+    let s = snapshot(&p);
+    assert!(s.contains("q\n"), "missing save: {s:?}");
+    assert!(s.contains("1.000 0.000 0.000 RG"), "missing RG: {s:?}");
+    assert!(s.contains("2.500 w"), "missing width: {s:?}");
+    assert!(s.contains("1 J"), "missing round cap: {s:?}");
+    assert!(s.contains("2 j"), "missing bevel join: {s:?}");
+    assert!(s.contains("4.000 M"), "missing miter limit: {s:?}");
+    assert!(s.contains("[3.000 1.000] 0 d"), "missing dash: {s:?}");
+    assert!(s.contains("1.000 2.000 m"), "missing move: {s:?}");
+    assert!(s.contains("9.000 8.000 l"), "missing line: {s:?}");
+    assert!(s.contains("S\n"), "missing stroke op: {s:?}");
+    assert!(s.contains("Q\n"), "missing restore: {s:?}");
+}
+
+#[test]
+fn stroke_path_state_is_isolated_from_a_later_stroke() {
+    let p = PdfPainter::new(W, H);
+    p.stroke_path(
+        &Path::new(&[
+            PathCmd::Move(PointF::new(1.0, 2.0)),
+            PathCmd::Line(PointF::new(9.0, 8.0)),
+        ]),
+        PaintColor::Static("#ff0000"),
+        &StrokeStyle {
+            width: 2.5,
+            cap: LineCap::Round,
+            join: LineJoin::Bevel,
+            miter_limit: 4.0,
+            dash: &[3.0, 1.0],
+        },
+    );
+    p.rect_stroke(rect(0, 0, 10, 10), PaintColor::Static("#00ff00"), 1.0);
+    let s = snapshot(&p);
+    // The styled path's `q`/`Q` scope must keep its dash from reaching the
+    // later solid rect stroke.
+    let after = s.split("Q\n").nth(1).expect("styled stroke closes with Q");
+    assert!(
+        !after.contains(" d\n"),
+        "dash leaked past the stroke scope: {after:?}"
+    );
+    assert!(
+        !after.contains(" J\n") && !after.contains(" j\n"),
+        "cap/join leaked past the stroke scope: {after:?}"
     );
 }
 

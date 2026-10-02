@@ -7,7 +7,9 @@ use std::collections::HashSet;
 use iron_canvas_core::geometry::path::{Path, PathCmd};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
-use iron_canvas_core::painter::{BlitPainter, GroupClass, PaintColor, TextAlign, TextBaseline};
+use iron_canvas_core::painter::{
+    BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, StrokeStyle, TextAlign, TextBaseline,
+};
 use serde::{Deserialize, Serialize};
 
 /// Which layer surfaces a recording captures. Single enum (rather than two
@@ -56,6 +58,11 @@ pub enum DrawOp {
     FillPath {
         path: Vec<PathCmd>,
         color: String,
+    },
+    StrokePath {
+        path: Vec<PathCmd>,
+        color: String,
+        style: OwnedStrokeStyle,
     },
     FillCircle {
         cx: f64,
@@ -128,6 +135,43 @@ pub enum DrawOp {
     },
 }
 
+/// Owned stroke style for the wire. It mirrors [`StrokeStyle`] with an owned
+/// dash vector, so a capture outlives the caller's dash buffer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OwnedStrokeStyle {
+    pub width: f64,
+    pub cap: LineCap,
+    pub join: LineJoin,
+    pub miter_limit: f64,
+    pub dash: Vec<f64>,
+}
+
+impl OwnedStrokeStyle {
+    /// Borrow this style for a painter call. Replay owns the capture, so the
+    /// borrow lives for the call. An invalid style no-ops in the painter.
+    pub fn as_borrowed(&self) -> StrokeStyle<'_> {
+        StrokeStyle {
+            width: self.width,
+            cap: self.cap,
+            join: self.join,
+            miter_limit: self.miter_limit,
+            dash: &self.dash,
+        }
+    }
+}
+
+impl From<&StrokeStyle<'_>> for OwnedStrokeStyle {
+    fn from(style: &StrokeStyle<'_>) -> Self {
+        Self {
+            width: style.width,
+            cap: style.cap,
+            join: style.join,
+            miter_limit: style.miter_limit,
+            dash: style.dash.to_vec(),
+        }
+    }
+}
+
 /// Replay a captured op log onto any `BlitPainter`. Debug-visualizer
 /// path — e.g. record once via `RecorderPainter`, then replay onto
 /// `SvgPainter` for a golden artifact, or onto a second `RecorderPainter`
@@ -158,6 +202,15 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
                 // `fill_path` validates and no-ops on an invalid path, so raw
                 // replay follows the same rules as direct painting.
                 target.fill_path(&Path::new(path), PaintColor::Borrowed(color));
+            }
+            DrawOp::StrokePath { path, color, style } => {
+                // `stroke_path` validates the path and style, and no-ops on
+                // invalid input, so raw replay follows the direct-paint rules.
+                target.stroke_path(
+                    &Path::new(path),
+                    PaintColor::Borrowed(color),
+                    &style.as_borrowed(),
+                );
             }
             DrawOp::FillCircle {
                 cx,

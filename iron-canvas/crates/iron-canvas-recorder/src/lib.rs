@@ -27,7 +27,8 @@ mod tests {
     use iron_canvas_core::geometry::path::{Path, PathCmd, PointF};
     use iron_canvas_core::geometry::prim::{Line, Span};
     use iron_canvas_core::painter::{
-        BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+        BlitPainter, GroupClass, LineCap, LineJoin, PaintColor, Painter, StrokeStyle, TextAlign,
+        TextBaseline, TextMetrics,
     };
     use iron_canvas_core::surface::Surface;
     use std::collections::HashSet;
@@ -91,6 +92,35 @@ mod tests {
             ]),
             PaintColor::Static("#abc"),
         );
+        src.stroke_path(
+            &Path::new(&[
+                PathCmd::Move(PointF::new(1.0, 1.0)),
+                PathCmd::Line(PointF::new(9.0, 9.0)),
+            ]),
+            PaintColor::Static("#00ff00"),
+            &StrokeStyle {
+                width: 2.0,
+                cap: LineCap::Butt,
+                join: LineJoin::Miter,
+                miter_limit: 10.0,
+                dash: &[3.0, 1.0],
+            },
+        );
+        src.stroke_path(
+            &Path::new(&[
+                PathCmd::Move(PointF::new(0.0, 0.0)),
+                PathCmd::Line(PointF::new(5.0, 5.0)),
+                PathCmd::Close,
+            ]),
+            PaintColor::Static("#ff00ff"),
+            &StrokeStyle {
+                width: 1.5,
+                cap: LineCap::Round,
+                join: LineJoin::Round,
+                miter_limit: 2.0,
+                dash: &[],
+            },
+        );
         src.fill_circle(5.0, 5.0, 3.0, PaintColor::Static("#abcdef"));
         src.clear_rect(r);
         src.rect_stroke(r, PaintColor::Static("#00ff00"), 1.0);
@@ -142,6 +172,46 @@ mod tests {
 
         // replay prepends one InvalidateCache; assert the tail matches.
         assert!(matches!(replayed[0], DrawOp::InvalidateCache));
+        assert_eq!(&replayed[1..], &ops[..]);
+    }
+
+    #[test]
+    fn stroke_capture_owns_its_dash_pattern() {
+        // The caller's dash buffer is dropped before the capture is read, so
+        // the owned style must not borrow it.
+        let p = RecorderPainter::new();
+        let dash = vec![4.0, 2.0];
+        p.stroke_path(
+            &Path::new(&[
+                PathCmd::Move(PointF::new(0.0, 0.0)),
+                PathCmd::Line(PointF::new(10.0, 0.0)),
+            ]),
+            PaintColor::Static("#123456"),
+            &StrokeStyle {
+                width: 3.0,
+                cap: LineCap::Square,
+                join: LineJoin::Bevel,
+                miter_limit: 4.0,
+                dash: &dash,
+            },
+        );
+        drop(dash);
+
+        let ops = p.into_ops();
+        let DrawOp::StrokePath { style, color, .. } = &ops[0] else {
+            panic!("expected a StrokePath op");
+        };
+        assert_eq!(color, "#123456");
+        assert_eq!(style.width, 3.0);
+        assert_eq!(style.cap, LineCap::Square);
+        assert_eq!(style.join, LineJoin::Bevel);
+        assert_eq!(style.miter_limit, 4.0);
+        assert_eq!(style.dash, vec![4.0, 2.0]);
+
+        // Replay reads the owned style and round-trips it unchanged.
+        let sink = RecorderPainter::new();
+        super::replay(&sink, &ops);
+        let replayed = sink.into_ops();
         assert_eq!(&replayed[1..], &ops[..]);
     }
 

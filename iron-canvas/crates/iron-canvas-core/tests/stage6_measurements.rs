@@ -237,6 +237,7 @@ impl OpCounts {
                 }
                 DrawOp::RectStroke { .. }
                 | DrawOp::RectDashed { .. }
+                | DrawOp::StrokePath { .. }
                 | DrawOp::StrokeLine { .. }
                 | DrawOp::StrokeHLine { .. }
                 | DrawOp::StrokeVLine { .. }
