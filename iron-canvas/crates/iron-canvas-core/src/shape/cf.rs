@@ -11,6 +11,13 @@
 //! The single rotated arrow in D4 of the design is deferred until a saved
 //! Excel reference exists to compare all five glyphs at the same size; this
 //! module landing does not depend on that gate.
+//!
+//! The gate was attempted: the only in-tree conditional-formatting fixture
+//! (`IronCalc/xlsx/tests/conditional_formatting/cf_tests.xlsx`, sheet
+//! `IconSets`) was rendered with LibreOffice. That is not an Excel reference,
+//! it draws its own colored icon artwork, and its diagonal glyph is not a
+//! rotation of its cardinal glyph. It therefore does not support replacing
+//! the definitions, and D4 keeps them as they are.
 
 /// One drawing part of a glyph, in unit-box coordinates.
 #[derive(Debug, Clone, Copy)]
@@ -271,6 +278,8 @@ pub const ALL: &[&GlyphDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::path::PointF;
+    use crate::shape::place::Placement;
 
     #[test]
     fn every_glyph_fits_the_placement_buffer() {
@@ -311,5 +320,66 @@ mod tests {
         // `IconGlyph` has 20 variants; the renderer's exhaustive match maps
         // each to one definition here.
         assert_eq!(ALL.len(), 20);
+    }
+
+    // D4 construction check. These tests pin the *construction* relationship
+    // between the current arrow definitions; they do not assert Excel
+    // fidelity. The single-arrow proposal would replace the cardinal and
+    // diagonal tables with one arrow rotated per variant, which requires an
+    // Excel reference comparison that is not available (see the module doc).
+    // The cardinal test passes today; the diagonal test fails the moment the
+    // arrows are unified by rotation, so a change must come with the gate.
+
+    fn rotated(vertices: &[(f64, f64)], angle: f64) -> Vec<(f64, f64)> {
+        let place = Placement::fit(0.0, 0.0, 1.0, 1.0, angle).unwrap();
+        vertices
+            .iter()
+            .map(|&(x, y)| {
+                let p = place.point(PointF::new(x, y));
+                (p.x, p.y)
+            })
+            .collect()
+    }
+
+    fn same_vertex_set(a: &[(f64, f64)], b: &[(f64, f64)]) -> bool {
+        const EPS: f64 = 1e-9;
+        a.len() == b.len()
+            && a.iter().all(|pa| {
+                b.iter()
+                    .any(|pb| (pa.0 - pb.0).abs() < EPS && (pa.1 - pb.1).abs() < EPS)
+            })
+    }
+
+    #[test]
+    fn cardinal_arrows_are_rotations_of_each_other() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        assert!(same_vertex_set(
+            &rotated(&ARROW_UP_HEAD, FRAC_PI_2),
+            &ARROW_RIGHT_HEAD,
+        ));
+        assert!(same_vertex_set(
+            &rotated(&ARROW_UP_SHAFT, FRAC_PI_2),
+            &ARROW_RIGHT_SHAFT,
+        ));
+        assert!(same_vertex_set(
+            &rotated(&ARROW_UP_HEAD, PI),
+            &ARROW_DOWN_HEAD
+        ));
+        assert!(same_vertex_set(
+            &rotated(&ARROW_UP_SHAFT, PI),
+            &ARROW_DOWN_SHAFT,
+        ));
+    }
+
+    #[test]
+    fn diagonal_arrows_are_not_rotations_of_the_cardinal_arrow() {
+        use std::f64::consts::FRAC_PI_4;
+        for angle in [-FRAC_PI_4, FRAC_PI_4] {
+            assert!(
+                !same_vertex_set(&rotated(&ARROW_UP_HEAD, angle), &ARROW_ANGLE_UP_HEAD),
+                "the diagonal head is a rotated cardinal head at {angle}; \
+                 unifying the arrows changed their construction without the D4 gate",
+            );
+        }
     }
 }
