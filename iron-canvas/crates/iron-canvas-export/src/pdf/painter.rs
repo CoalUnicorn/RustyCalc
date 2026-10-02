@@ -15,8 +15,9 @@ use std::io::Write as _;
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
+use iron_canvas_core::geometry::path::{Path, PathCmd, PointF, arc_to_cubics, quad_to_cubic};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     parse_font_size_px,
@@ -202,25 +203,73 @@ impl Painter for PdfPainter {
         self.write_str("Q\n");
     }
 
-    fn fill_path(&self, points: &[Point], color: PaintColor) {
-        if points.len() < 2 {
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
+        if path.validate().is_err() || path.is_empty() {
             return;
         }
         self.emit_fill_color(color);
-        let first = points[0];
-        self.emit(format_args!(
-            "{:.3} {:.3} m\n",
-            f64::from(first.x),
-            f64::from(first.y)
-        ));
-        for p in &points[1..] {
-            self.emit(format_args!(
-                "{:.3} {:.3} l\n",
-                f64::from(p.x),
-                f64::from(p.y)
-            ));
+        let mut cur: Option<PointF> = None;
+        let mut subpath_start: Option<PointF> = None;
+        for cmd in path.cmds() {
+            match cmd {
+                PathCmd::Move(p) => {
+                    self.emit(format_args!("{:.3} {:.3} m\n", p.x, p.y));
+                    cur = Some(*p);
+                    subpath_start = Some(*p);
+                }
+                PathCmd::Line(p) => {
+                    self.emit(format_args!("{:.3} {:.3} l\n", p.x, p.y));
+                    cur = Some(*p);
+                }
+                PathCmd::Quad(q, e) => {
+                    let Some(p0) = cur else { continue };
+                    let (c1, c2) = quad_to_cubic(p0, *q, *e);
+                    self.emit(format_args!(
+                        "{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n",
+                        c1.x, c1.y, c2.x, c2.y, e.x, e.y
+                    ));
+                    cur = Some(*e);
+                }
+                PathCmd::Cubic(a, b, e) => {
+                    self.emit(format_args!(
+                        "{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n",
+                        a.x, a.y, b.x, b.y, e.x, e.y
+                    ));
+                    cur = Some(*e);
+                }
+                PathCmd::Arc(spec) => {
+                    if spec.sweep_angle == 0.0 {
+                        continue;
+                    }
+                    let start = spec.start_point();
+                    match cur {
+                        // No current subpath: the arc starts one at its start.
+                        None => {
+                            self.emit(format_args!("{:.3} {:.3} m\n", start.x, start.y));
+                            subpath_start = Some(start);
+                        }
+                        // A current point: connect with a line when it differs.
+                        Some(p) if p != start => {
+                            self.emit(format_args!("{:.3} {:.3} l\n", start.x, start.y));
+                        }
+                        Some(_) => {}
+                    }
+                    arc_to_cubics(*spec, |c1, c2, end| {
+                        self.emit(format_args!(
+                            "{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n",
+                            c1.x, c1.y, c2.x, c2.y, end.x, end.y
+                        ));
+                    });
+                    cur = Some(spec.end_point());
+                }
+                PathCmd::Close => {
+                    self.write_str("h\n");
+                    cur = subpath_start;
+                }
+            }
         }
-        self.write_str("h\nf\n"); // h closes the subpath; f fills
+        // `f` fills every subpath and implicitly closes open ones.
+        self.write_str("f\n");
     }
 
     fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {

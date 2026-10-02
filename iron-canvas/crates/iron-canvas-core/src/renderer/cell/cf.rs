@@ -15,6 +15,7 @@
 
 use std::rc::Rc;
 
+use crate::geometry::path::{Path, PathCmd, PointF};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{PaintColor, Painter};
@@ -432,18 +433,37 @@ struct GlyphCanvas<'a, P: Painter + ?Sized> {
 
 impl<P: Painter + ?Sized> GlyphCanvas<'_, P> {
     /// Fill the closed polygon whose vertices are unit-box coordinates.
+    ///
+    /// Vertices keep float precision: the old integer `Point` rounding turned
+    /// a curve or a rotated edge into a visually faceted polygon.
     fn poly(&self, unit: &[(f64, f64)]) {
         const MAX_VERTICES: usize = 32;
-        let mut pixels = [Point { x: 0, y: 0 }; MAX_VERTICES];
         let count = unit.len().min(MAX_VERTICES);
-        for (out, (u, v)) in pixels.iter_mut().zip(unit.iter()) {
-            *out = Point {
-                x: (self.left + u * self.size).round() as i32,
-                y: (self.top + v * self.size).round() as i32,
-            };
+        if count == 0 {
+            return;
         }
-        self.painter
-            .fill_path(&pixels[..count], PaintColor::Borrowed(self.color));
+        // Move + one Line per remaining vertex + Close, in one bounded stack
+        // buffer. The slice below excludes the unused slots, so the
+        // placeholder value never reaches the painter and no `Vec` is needed
+        // in the paint loop.
+        let mut cmds = [PathCmd::Close; MAX_VERTICES + 1];
+        cmds[0] = PathCmd::Move(self.point(unit[0]));
+        for (slot, (u, v)) in cmds[1..count].iter_mut().zip(unit[1..count].iter()) {
+            *slot = PathCmd::Line(self.point((*u, *v)));
+        }
+        cmds[count] = PathCmd::Close;
+        self.painter.fill_path(
+            &Path::new(&cmds[..count + 1]),
+            PaintColor::Borrowed(self.color),
+        );
+    }
+
+    /// Map a unit-box coordinate onto the glyph box in float pixel space.
+    fn point(&self, (u, v): (f64, f64)) -> PointF {
+        PointF {
+            x: self.left + u * self.size,
+            y: self.top + v * self.size,
+        }
     }
 
     /// Fill a thick segment from `a` to `b` (unit coords) with `half`

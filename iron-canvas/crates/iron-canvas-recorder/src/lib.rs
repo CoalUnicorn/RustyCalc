@@ -24,7 +24,8 @@ mod test_support;
 mod tests {
     use super::*;
     use crate::test_support::pix;
-    use iron_canvas_core::geometry::prim::{Line, Point, Span};
+    use iron_canvas_core::geometry::path::{Path, PathCmd, PointF};
+    use iron_canvas_core::geometry::prim::{Line, Span};
     use iron_canvas_core::painter::{
         BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     };
@@ -82,11 +83,12 @@ mod tests {
             PaintColor::Static("#0000ff"),
         );
         src.fill_path(
-            &[
-                Point { x: 0, y: 0 },
-                Point { x: 10, y: 0 },
-                Point { x: 5, y: 8 },
-            ],
+            &Path::new(&[
+                PathCmd::Move(PointF::new(0.0, 0.0)),
+                PathCmd::Line(PointF::new(10.0, 0.0)),
+                PathCmd::Quad(PointF::new(8.0, 4.0), PointF::new(5.0, 8.0)),
+                PathCmd::Close,
+            ]),
             PaintColor::Static("#abc"),
         );
         src.fill_circle(5.0, 5.0, 3.0, PaintColor::Static("#abcdef"));

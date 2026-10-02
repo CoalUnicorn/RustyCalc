@@ -8,8 +8,9 @@
 
 use std::cell::{Cell, RefCell};
 
+use iron_canvas_core::geometry::path::Path;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     approx_text_width, parse_font_size_px,
@@ -85,9 +86,9 @@ impl Painter for RecorderPainter {
         });
     }
 
-    fn fill_path(&self, points: &[Point], color: PaintColor) {
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
         self.push(DrawOp::FillPath {
-            points: points.to_vec(),
+            path: path.cmds().to_vec(),
             color: color.as_str().to_string(),
         });
     }

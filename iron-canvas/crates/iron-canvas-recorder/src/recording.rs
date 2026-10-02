@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v9)
+//! # On-disk layout (v10)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":9,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":10,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `9`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `10`). Mismatch -> load fails. |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -73,6 +73,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use iron_canvas_core::geometry::path::Path;
 use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{FrameInputFailure, FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
@@ -82,10 +83,11 @@ use crate::DrawOp;
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
 ///
-/// v9 adds the `DrawOp::FillCircle` variant. An older reader rejects the
-/// file rather than dropping the op, which would silently lose the round
-/// conditional-formatting glyphs.
-pub const ICR_SCHEMA_VERSION: u32 = 9;
+/// v9 adds the `DrawOp::FillCircle` variant. v10 changes `DrawOp::FillPath`
+/// from integer `points` to a float `path` command list (curve support). An
+/// older reader rejects the file rather than dropping the op or misreading
+/// the shape geometry.
+pub const ICR_SCHEMA_VERSION: u32 = 10;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -346,6 +348,14 @@ fn validate_ops(frame_index: usize, channel: &str, ops: &[DrawOp]) -> Result<(),
                     )));
                 }
             }
+            // A recorded path must be valid before playback starts: a
+            // non-finite coordinate or a segment without a current subpath
+            // would otherwise reach the painter mid-stream.
+            DrawOp::FillPath { path, .. } if Path::new(path).validate().is_err() => {
+                return Err(IcrError::Format(format!(
+                    "frame {frame_index} {channel}: FillPath carries an invalid path",
+                )));
+            }
             _ => {}
         }
         if !draw_op_numbers_are_finite(op) {
@@ -368,7 +378,8 @@ fn validate_ops(frame_index: usize, channel: &str, ops: &[DrawOp]) -> Result<(),
 }
 
 /// Every `f64` a draw op can carry. Integer fields (`PixelRect`, `Point`,
-/// `Span`, `Line`) are finite by their types.
+/// `Span`, `Line`) are finite by their types. A `FillPath` payload is checked
+/// structurally in [`validate_ops`].
 fn draw_op_numbers_are_finite(op: &DrawOp) -> bool {
     match op {
         DrawOp::RectStroke { width, .. } | DrawOp::RectDashed { width, .. } => width.is_finite(),

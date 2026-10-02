@@ -14,11 +14,9 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 
 use crate::Span;
+use crate::geometry::path::Path;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::{Line, Point};
-
-pub mod shapes;
-pub use shapes::PainterShapes;
+use crate::geometry::prim::Line;
 
 /// Color/font argument for the `Painter` surface. The `Static` variant carries
 /// a `&'static str` whose address is stable for the program lifetime, so the
@@ -161,13 +159,15 @@ pub trait Painter: TextMetrics {
     /// `createLinearGradient`, SVG `linearGradient`, PDF axial shading),
     /// never a browser-only shortcut or a banded approximation.
     fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor);
-    /// Fill the closed polygon defined by `points`, in pixel space. The path
-    /// implicitly closes from `points.last()` to `points.first()`. Empty or
-    /// single-point input is a no-op.
+    /// Fill the float path with `color`, in logical pixel space.
     ///
-    /// Every point is an integer pixel, so this cannot represent a smooth
-    /// curve. Use [`Self::fill_circle`] for round shapes.
-    fn fill_path(&self, points: &[Point], color: PaintColor);
+    /// Uses the nonzero winding rule; fill implicitly closes each open
+    /// subpath. An empty path, a subpath with only a `Move`, and an invalid
+    /// path (non-finite coordinate, segment without a current subpath, or a
+    /// bad arc) are no-ops. The path can carry lines, quadratic and cubic
+    /// curves, and circular arcs, so a shape reaches every backend as a
+    /// curve. The existing [`Self::fill_circle`] primitive stays available.
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor);
     /// Fill the circle centred at `(cx, cy)` with the given `radius`, both in
     /// logical pixels. A non-positive radius is a no-op. Every backend draws
     /// it with its own curve primitive (Canvas2D `arc`, SVG `<circle>`, PDF

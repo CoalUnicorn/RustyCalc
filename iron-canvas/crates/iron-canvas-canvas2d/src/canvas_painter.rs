@@ -14,8 +14,9 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
 use iron_canvas_core::geometry::{
     constants::{DASHED_RECT_PATTERN, STANDARD_BORDER_WIDTH},
+    path::{Path, PathCmd},
     pixel_rect::PixelRect,
-    prim::{Line, Point, Span},
+    prim::{Line, Span},
 };
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
@@ -348,18 +349,42 @@ impl Painter for CanvasPainter {
         self.ctx.fill_rect(x, y, w, h);
     }
 
-    fn fill_path(&self, points: &[Point], color: PaintColor) {
-        if points.len() < 2 {
-            return; // empty or single-point is a no-op
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
+        if path.validate().is_err() {
+            return; // invalid path paints nothing
         }
         self.set_fill_cached(color);
         self.ctx.begin_path();
-        let first = points[0];
-        self.ctx.move_to(f64::from(first.x), f64::from(first.y));
-        for p in &points[1..] {
-            self.ctx.line_to(f64::from(p.x), f64::from(p.y));
+        for cmd in path.cmds() {
+            match cmd {
+                PathCmd::Move(p) => self.ctx.move_to(p.x, p.y),
+                PathCmd::Line(p) => self.ctx.line_to(p.x, p.y),
+                PathCmd::Quad(c, e) => self.ctx.quadratic_curve_to(c.x, c.y, e.x, e.y),
+                PathCmd::Cubic(a, b, e) => {
+                    self.ctx.bezier_curve_to(a.x, a.y, b.x, b.y, e.x, e.y);
+                }
+                PathCmd::Arc(spec) => {
+                    // A zero sweep has no effect on the path.
+                    if spec.sweep_angle == 0.0 {
+                        continue;
+                    }
+                    // Canvas `arc` runs counter-clockwise for `true`; a
+                    // negative sweep is the counter-clockwise direction in
+                    // this Y-down space. Canvas draws the connecting line to
+                    // the arc start when a current point exists, which matches
+                    // the D1 arc contract.
+                    let _ = self.ctx.arc_with_anticlockwise(
+                        spec.center.x,
+                        spec.center.y,
+                        spec.radius,
+                        spec.start_angle,
+                        spec.start_angle + spec.sweep_angle,
+                        spec.sweep_angle < 0.0,
+                    );
+                }
+                PathCmd::Close => self.ctx.close_path(),
+            }
         }
-        self.ctx.close_path();
         self.ctx.fill();
     }
 

@@ -8,8 +8,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasMetrics;
+use iron_canvas_core::geometry::path::Path;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -118,10 +119,10 @@ impl<P: BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
-    fn fill_path(&self, points: &[Point], color: PaintColor) {
-        self.inner.fill_path(points, color);
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
+        self.inner.fill_path(path, color);
         if self.should_record() {
-            self.recorder.fill_path(points, color);
+            self.recorder.fill_path(path, color);
         }
     }
 

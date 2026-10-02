@@ -4,8 +4,9 @@
 
 use std::collections::HashSet;
 
+use iron_canvas_core::geometry::path::{Path, PathCmd};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{BlitPainter, GroupClass, PaintColor, TextAlign, TextBaseline};
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +54,7 @@ pub enum DrawOp {
         to: String,
     },
     FillPath {
-        points: Vec<Point>,
+        path: Vec<PathCmd>,
         color: String,
     },
     FillCircle {
@@ -153,8 +154,10 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
                     PaintColor::Borrowed(to),
                 );
             }
-            DrawOp::FillPath { points, color } => {
-                target.fill_path(points, PaintColor::Borrowed(color));
+            DrawOp::FillPath { path, color } => {
+                // `fill_path` validates and no-ops on an invalid path, so raw
+                // replay follows the same rules as direct painting.
+                target.fill_path(&Path::new(path), PaintColor::Borrowed(color));
             }
             DrawOp::FillCircle {
                 cx,

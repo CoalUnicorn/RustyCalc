@@ -9,12 +9,26 @@ mod common;
 
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
+use iron_canvas_core::geometry::path::{PathCmd, PointF};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
+
+/// The path vertices a `FillPath` op paints, in command order: `Move`/`Line`
+/// endpoints, curve endpoints, and arc end points. `Close` contributes none.
+fn path_points(path: &[PathCmd]) -> Vec<PointF> {
+    path.iter()
+        .filter_map(|cmd| match cmd {
+            PathCmd::Move(p) | PathCmd::Line(p) => Some(*p),
+            PathCmd::Quad(_, e) | PathCmd::Cubic(_, _, e) => Some(*e),
+            PathCmd::Arc(spec) => Some(spec.end_point()),
+            PathCmd::Close => None,
+        })
+        .collect()
+}
 
 fn data_bar(color: &str, value: f64) -> CellDecoration {
     bar(color, None, value, 0.0, false)
@@ -331,12 +345,12 @@ fn gradient_data_bar_emits_a_gradient_fill() {
 #[test]
 fn rating_paints_count_glyphs_in_the_resolved_color() {
     let (core, _) = render_cell(rating(3, 5));
-    let paths: Vec<(Vec<iron_canvas_core::geometry::prim::Point>, String)> = core
+    let paths: Vec<(Vec<PointF>, String)> = core
         .painter()
         .ops()
         .iter()
         .filter_map(|op| match op {
-            DrawOp::FillPath { points, color } => Some((points.clone(), color.clone())),
+            DrawOp::FillPath { path, color } => Some((path_points(path), color.clone())),
             _ => None,
         })
         .collect();
@@ -345,7 +359,7 @@ fn rating_paints_count_glyphs_in_the_resolved_color() {
         paths.iter().all(|(_, color)| color == "#000000"),
         "rating color comes from the engine (unresolved -> black)"
     );
-    let xs: Vec<i32> = paths.iter().map(|(points, _)| points[0].x).collect();
+    let xs: Vec<f64> = paths.iter().map(|(points, _)| points[0].x).collect();
     assert!(
         xs[0] < xs[1] && xs[1] < xs[2],
         "glyphs advance left to right"
@@ -426,7 +440,7 @@ fn chevrons_are_distinct_from_filled_triangles() {
                 .ops()
                 .iter()
                 .filter_map(|op| match op {
-                    DrawOp::FillPath { points, .. } => Some(points.clone()),
+                    DrawOp::FillPath { path, .. } => Some(path_points(path)),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -518,17 +532,17 @@ fn icon_and_rating_have_separate_slots_before_the_value() {
     let icon_right = ops
         .iter()
         .filter_map(|op| match op {
-            DrawOp::FillPath { points, color } if color == "#84cb1f" => {
-                points.iter().map(|p| p.x).max()
+            DrawOp::FillPath { path, color } if color == "#84cb1f" => {
+                path_points(path).iter().map(|p| p.x).reduce(f64::max)
             }
             _ => None,
         })
-        .max()
+        .reduce(f64::max)
         .expect("icon paints");
     let rating_points: Vec<_> = ops
         .iter()
         .filter_map(|op| match op {
-            DrawOp::FillPath { points, color } if color == "#000000" => Some(points),
+            DrawOp::FillPath { path, color } if color == "#000000" => Some(path_points(path)),
             _ => None,
         })
         .flatten()
@@ -540,9 +554,9 @@ fn icon_and_rating_have_separate_slots_before_the_value() {
     let rating_right = rating_points
         .iter()
         .map(|p| p.x)
-        .max()
+        .reduce(f64::max)
         .expect("rating paints");
-    assert!(fill_text_x(core.painter(), rect).expect("value paints") > f64::from(rating_right));
+    assert!(fill_text_x(core.painter(), rect).expect("value paints") > rating_right);
 }
 
 #[test]
@@ -557,7 +571,11 @@ fn wide_rating_is_clipped_to_its_cell() {
             DrawOp::PopClip => {
                 clips.pop();
             }
-            DrawOp::FillPath { points, .. } if points.iter().any(|p| p.x > rect.right()) => {
+            DrawOp::FillPath { path, .. }
+                if path_points(path)
+                    .iter()
+                    .any(|p| p.x > f64::from(rect.right())) =>
+            {
                 assert!(
                     clips
                         .iter()

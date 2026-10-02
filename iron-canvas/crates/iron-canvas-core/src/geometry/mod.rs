@@ -8,6 +8,7 @@
 pub mod constants;
 pub mod extent;
 pub mod labels;
+pub mod path;
 pub mod pixel_rect;
 pub mod prim;
 pub mod slot;

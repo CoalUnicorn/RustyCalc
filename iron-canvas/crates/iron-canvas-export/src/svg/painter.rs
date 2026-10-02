@@ -11,8 +11,9 @@ use std::fmt::Write as _;
 use std::mem;
 
 use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
+use iron_canvas_core::geometry::path::{Path, PathCmd, arc_segments};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     parse_font_size_px,
@@ -168,20 +169,53 @@ impl Painter for SvgPainter {
         let _ = write!(body, " fill=\"url(#g{id})\"/>");
     }
 
-    fn fill_path(&self, points: &[Point], color: PaintColor) {
-        if points.len() < 2 {
+    fn fill_path(&self, path: &Path<'_>, color: PaintColor) {
+        if path.validate().is_err() || path.is_empty() {
             return;
         }
         let mut body = self.body.borrow_mut();
         body.push_str("<path d=\"");
-        let first = points[0];
-        let _ = write!(body, "M{:.3} {:.3}", f64::from(first.x), f64::from(first.y));
-        for p in &points[1..] {
-            let _ = write!(body, " L{:.3} {:.3}", f64::from(p.x), f64::from(p.y));
+        for cmd in path.cmds() {
+            match cmd {
+                PathCmd::Move(p) => {
+                    let _ = write!(body, "M{:.3} {:.3}", p.x, p.y);
+                }
+                PathCmd::Line(p) => {
+                    let _ = write!(body, " L{:.3} {:.3}", p.x, p.y);
+                }
+                PathCmd::Quad(c, e) => {
+                    let _ = write!(body, " Q{:.3} {:.3} {:.3} {:.3}", c.x, c.y, e.x, e.y);
+                }
+                PathCmd::Cubic(a, b, e) => {
+                    let _ = write!(
+                        body,
+                        " C{:.3} {:.3} {:.3} {:.3} {:.3} {:.3}",
+                        a.x, a.y, b.x, b.y, e.x, e.y
+                    );
+                }
+                PathCmd::Arc(spec) => {
+                    if spec.sweep_angle == 0.0 {
+                        continue;
+                    }
+                    // A full turn has start == end, which one `A` cannot
+                    // express; split into at most half-turn segments.
+                    arc_segments(*spec, std::f64::consts::PI, |start, sweep| {
+                        let end = spec.point_at(start + sweep);
+                        let large = u8::from(sweep.abs() > std::f64::consts::PI);
+                        let sweep_flag = u8::from(sweep > 0.0);
+                        let _ = write!(
+                            body,
+                            " A{:.3} {:.3} 0 {} {} {:.3} {:.3}",
+                            spec.radius, spec.radius, large, sweep_flag, end.x, end.y
+                        );
+                    });
+                }
+                PathCmd::Close => body.push('Z'),
+            }
         }
-        body.push_str("Z\" fill=\"");
+        body.push_str("\" fill=\"");
         xml_escape(color.as_str(), &mut body);
-        body.push_str("\"/>");
+        body.push_str("\" fill-rule=\"nonzero\"/>");
     }
 
     fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
