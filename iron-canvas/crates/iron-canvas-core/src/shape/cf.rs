@@ -6,18 +6,18 @@
 //! coordinates are unit-box fractions (0..1, Y-down), placed by
 //! [`super::place`].
 //!
-//! The arrow definitions are still the pre-unification tables: cardinal and
-//! diagonal arrows keep their distinct head proportions and segment shafts.
-//! The single rotated arrow in D4 of the design is deferred until a saved
-//! Excel reference exists to compare all five glyphs at the same size; this
-//! module landing does not depend on that gate.
+//! # Arrows (D4)
 //!
-//! The gate was attempted: the only in-tree conditional-formatting fixture
-//! (`IronCalc/xlsx/tests/conditional_formatting/cf_tests.xlsx`, sheet
-//! `IconSets`) was rendered with LibreOffice. That is not an Excel reference,
-//! it draws its own colored icon artwork, and its diagonal glyph is not a
-//! rotation of its cardinal glyph. It therefore does not support replacing
-//! the definitions, and D4 keeps them as they are.
+//! One arrow points along +x; every arrow variant is that definition rotated
+//! clockwise in Y-down space: `ArrowRight` 0°, `ArrowDown` 90°, `ArrowUp`
+//! -90°, `ArrowAngleDown` 45°, `ArrowAngleUp` -45°.
+//!
+//! The gate passed on a user-supplied comparison set: the same `IconSets`
+//! sheet rendered by IronCalc and by LibreOffice draws all five arrow glyphs
+//! as one arrow shape rotated, and the rotated definition matches the
+//! LibreOffice construction. That is the reference D4 asked for, so the
+//! pre-unification cardinal and diagonal tables are replaced by this one
+//! definition and its five rotations.
 
 /// One drawing part of a glyph, in unit-box coordinates.
 #[derive(Debug, Clone, Copy)]
@@ -49,10 +49,12 @@ impl GlyphPart {
     }
 }
 
-/// A complete glyph: one or more parts, painted in order.
+/// A complete glyph: one or more parts, painted in order, rotated around the
+/// unit-box centre by `rotation` radians (clock-wise in Y-down space).
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphDef {
     pub parts: &'static [GlyphPart],
+    pub rotation: f64,
 }
 
 /// Largest slot count any single built-in part needs. The renderer's stack
@@ -60,16 +62,11 @@ pub struct GlyphDef {
 /// than truncate a path.
 pub const MAX_PART_CMDS: usize = 11;
 
-// Arrow glyphs: a triangular head plus a rectangular shaft, in a unit box
-// (x right, y down).
-const ARROW_UP_HEAD: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.52), (0.02, 0.52)];
-const ARROW_UP_SHAFT: [(f64, f64); 4] = [(0.38, 0.42), (0.62, 0.42), (0.62, 0.98), (0.38, 0.98)];
-const ARROW_DOWN_HEAD: [(f64, f64); 3] = [(0.5, 0.98), (0.98, 0.48), (0.02, 0.48)];
-const ARROW_DOWN_SHAFT: [(f64, f64); 4] = [(0.38, 0.02), (0.62, 0.02), (0.62, 0.58), (0.38, 0.58)];
-const ARROW_RIGHT_HEAD: [(f64, f64); 3] = [(0.98, 0.5), (0.48, 0.02), (0.48, 0.98)];
-const ARROW_RIGHT_SHAFT: [(f64, f64); 4] = [(0.02, 0.38), (0.58, 0.38), (0.58, 0.62), (0.02, 0.62)];
-const ARROW_ANGLE_UP_HEAD: [(f64, f64); 3] = [(1.0, 0.02), (0.40, 0.06), (0.96, 0.60)];
-const ARROW_ANGLE_DOWN_HEAD: [(f64, f64); 3] = [(1.0, 0.98), (0.40, 0.94), (0.96, 0.40)];
+// The single arrow points along +x (x right, y down). Every arrow variant in
+// the definitions below is this shape, rotated.
+const ARROW_HEAD: [(f64, f64); 3] = [(0.98, 0.5), (0.48, 0.02), (0.48, 0.98)];
+const ARROW_SHAFT: [(f64, f64); 4] = [(0.02, 0.38), (0.58, 0.38), (0.58, 0.62), (0.02, 0.62)];
+const ARROW_PARTS: [GlyphPart; 2] = [GlyphPart::Poly(&ARROW_HEAD), GlyphPart::Poly(&ARROW_SHAFT)];
 
 const TRIANGLE_UP_FILLED_VERTS: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)];
 const TRIANGLE_DOWN_FILLED_VERTS: [(f64, f64); 3] = [(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)];
@@ -112,46 +109,31 @@ pub const STAR_INNER: f64 = 0.382;
 
 // One definition per `IconGlyph` variant. The renderer's exhaustive match
 // selects among these; keep the variants in the same order as `IconGlyph`.
+const QUARTER: f64 = std::f64::consts::FRAC_PI_2;
+
 pub const ARROW_UP: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Poly(&ARROW_UP_HEAD),
-        GlyphPart::Poly(&ARROW_UP_SHAFT),
-    ],
+    parts: &ARROW_PARTS,
+    rotation: -QUARTER,
 };
 pub const ARROW_RIGHT: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Poly(&ARROW_RIGHT_HEAD),
-        GlyphPart::Poly(&ARROW_RIGHT_SHAFT),
-    ],
+    parts: &ARROW_PARTS,
+    rotation: 0.0,
 };
 pub const ARROW_DOWN: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Poly(&ARROW_DOWN_HEAD),
-        GlyphPart::Poly(&ARROW_DOWN_SHAFT),
-    ],
+    parts: &ARROW_PARTS,
+    rotation: QUARTER,
 };
 pub const ARROW_ANGLE_UP: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Poly(&ARROW_ANGLE_UP_HEAD),
-        GlyphPart::Segment {
-            from: (0.06, 0.94),
-            to: (0.56, 0.44),
-            half: 0.11,
-        },
-    ],
+    parts: &ARROW_PARTS,
+    rotation: -std::f64::consts::FRAC_PI_4,
 };
 pub const ARROW_ANGLE_DOWN: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Poly(&ARROW_ANGLE_DOWN_HEAD),
-        GlyphPart::Segment {
-            from: (0.06, 0.06),
-            to: (0.56, 0.56),
-            half: 0.11,
-        },
-    ],
+    parts: &ARROW_PARTS,
+    rotation: std::f64::consts::FRAC_PI_4,
 };
 pub const CIRCLE: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Circle { radius: 0.5 }],
+    rotation: 0.0,
 };
 pub const TRIANGLE_UP: GlyphDef = GlyphDef {
     parts: &[
@@ -166,6 +148,7 @@ pub const TRIANGLE_UP: GlyphDef = GlyphDef {
             half: 0.05,
         },
     ],
+    rotation: 0.0,
 };
 pub const TRIANGLE_DOWN: GlyphDef = GlyphDef {
     parts: &[
@@ -180,21 +163,27 @@ pub const TRIANGLE_DOWN: GlyphDef = GlyphDef {
             half: 0.05,
         },
     ],
+    rotation: 0.0,
 };
 pub const TRIANGLE_UP_FILLED: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&TRIANGLE_UP_FILLED_VERTS)],
+    rotation: 0.0,
 };
 pub const TRIANGLE_DOWN_FILLED: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&TRIANGLE_DOWN_FILLED_VERTS)],
+    rotation: 0.0,
 };
 pub const FLAT_RECTANGLE: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&FLAT_RECTANGLE_VERTS)],
+    rotation: 0.0,
 };
 pub const RHOMBUS: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&RHOMBUS_VERTS)],
+    rotation: 0.0,
 };
 pub const FLAG: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&FLAG_POLE), GlyphPart::Poly(&FLAG_BANNER)],
+    rotation: 0.0,
 };
 pub const CHECK: GlyphDef = GlyphDef {
     parts: &[
@@ -209,6 +198,7 @@ pub const CHECK: GlyphDef = GlyphDef {
             half: 0.11,
         },
     ],
+    rotation: 0.0,
 };
 pub const CROSS: GlyphDef = GlyphDef {
     parts: &[
@@ -223,18 +213,22 @@ pub const CROSS: GlyphDef = GlyphDef {
             half: 0.12,
         },
     ],
+    rotation: 0.0,
 };
 pub const EXCLAMATION: GlyphDef = GlyphDef {
     parts: &[
         GlyphPart::Poly(&EXCLAMATION_BAR),
         GlyphPart::Poly(&EXCLAMATION_DOT),
     ],
+    rotation: 0.0,
 };
 pub const STAR: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Star { inner: STAR_INNER }],
+    rotation: 0.0,
 };
 pub const HEART: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&HEART_VERTS)],
+    rotation: 0.0,
 };
 pub const THUMBS_UP: GlyphDef = GlyphDef {
     parts: &[
@@ -242,6 +236,7 @@ pub const THUMBS_UP: GlyphDef = GlyphDef {
         GlyphPart::Poly(&THUMBS_UP_PALM),
         GlyphPart::Poly(&THUMBS_UP_FINGER),
     ],
+    rotation: 0.0,
 };
 pub const THUMBS_DOWN: GlyphDef = GlyphDef {
     parts: &[
@@ -249,6 +244,7 @@ pub const THUMBS_DOWN: GlyphDef = GlyphDef {
         GlyphPart::Poly(&THUMBS_DOWN_PALM),
         GlyphPart::Poly(&THUMBS_DOWN_FINGER),
     ],
+    rotation: 0.0,
 };
 
 /// Every built-in definition, for capacity and coverage tests.
@@ -280,6 +276,7 @@ mod tests {
     use super::*;
     use crate::geometry::path::PointF;
     use crate::shape::place::Placement;
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
     #[test]
     fn every_glyph_fits_the_placement_buffer() {
@@ -322,64 +319,47 @@ mod tests {
         assert_eq!(ALL.len(), 20);
     }
 
-    // D4 construction check. These tests pin the *construction* relationship
-    // between the current arrow definitions; they do not assert Excel
-    // fidelity. The single-arrow proposal would replace the cardinal and
-    // diagonal tables with one arrow rotated per variant, which requires an
-    // Excel reference comparison that is not available (see the module doc).
-    // The cardinal test passes today; the diagonal test fails the moment the
-    // arrows are unified by rotation, so a change must come with the gate.
-
-    fn rotated(vertices: &[(f64, f64)], angle: f64) -> Vec<(f64, f64)> {
-        let place = Placement::fit(0.0, 0.0, 1.0, 1.0, angle).unwrap();
-        vertices
-            .iter()
-            .map(|&(x, y)| {
-                let p = place.point(PointF::new(x, y));
-                (p.x, p.y)
-            })
-            .collect()
-    }
-
-    fn same_vertex_set(a: &[(f64, f64)], b: &[(f64, f64)]) -> bool {
-        const EPS: f64 = 1e-9;
-        a.len() == b.len()
-            && a.iter().all(|pa| {
-                b.iter()
-                    .any(|pb| (pa.0 - pb.0).abs() < EPS && (pa.1 - pb.1).abs() < EPS)
-            })
-    }
+    // D4 rotation-equivalence check: the five arrow variants must be one
+    // definition rotated to the five D4 angles, and the placed tip must point
+    // the expected way. This checks construction only; fidelity came from the
+    // IronCalc/LibreOffice comparison recorded in the module doc.
 
     #[test]
-    fn cardinal_arrows_are_rotations_of_each_other() {
-        use std::f64::consts::{FRAC_PI_2, PI};
-        assert!(same_vertex_set(
-            &rotated(&ARROW_UP_HEAD, FRAC_PI_2),
-            &ARROW_RIGHT_HEAD,
-        ));
-        assert!(same_vertex_set(
-            &rotated(&ARROW_UP_SHAFT, FRAC_PI_2),
-            &ARROW_RIGHT_SHAFT,
-        ));
-        assert!(same_vertex_set(
-            &rotated(&ARROW_UP_HEAD, PI),
-            &ARROW_DOWN_HEAD
-        ));
-        assert!(same_vertex_set(
-            &rotated(&ARROW_UP_SHAFT, PI),
-            &ARROW_DOWN_SHAFT,
-        ));
-    }
-
-    #[test]
-    fn diagonal_arrows_are_not_rotations_of_the_cardinal_arrow() {
-        use std::f64::consts::FRAC_PI_4;
-        for angle in [-FRAC_PI_4, FRAC_PI_4] {
-            assert!(
-                !same_vertex_set(&rotated(&ARROW_UP_HEAD, angle), &ARROW_ANGLE_UP_HEAD),
-                "the diagonal head is a rotated cardinal head at {angle}; \
-                 unifying the arrows changed their construction without the D4 gate",
-            );
+    fn the_five_arrow_variants_share_one_definition() {
+        let arrows = [
+            &ARROW_UP,
+            &ARROW_RIGHT,
+            &ARROW_DOWN,
+            &ARROW_ANGLE_UP,
+            &ARROW_ANGLE_DOWN,
+        ];
+        for def in arrows {
+            assert!(std::ptr::eq(def.parts.as_ptr(), ARROW_PARTS.as_ptr()));
+            assert_eq!(def.parts.len(), ARROW_PARTS.len());
         }
+        assert_eq!(ARROW_RIGHT.rotation, 0.0);
+        assert_eq!(ARROW_DOWN.rotation, FRAC_PI_2);
+        assert_eq!(ARROW_UP.rotation, -FRAC_PI_2);
+        assert_eq!(ARROW_ANGLE_DOWN.rotation, FRAC_PI_4);
+        assert_eq!(ARROW_ANGLE_UP.rotation, -FRAC_PI_4);
+    }
+
+    #[test]
+    fn each_rotation_points_the_arrow_the_expected_way() {
+        // The unrotated tip is the +x point.
+        let tip = PointF::new(0.98, 0.5);
+        let place = |def: &GlyphDef| Placement::fit(0.0, 0.0, 1.0, 1.0, def.rotation).unwrap();
+        let p = |def: &GlyphDef| place(def).point(tip);
+
+        let right = p(&ARROW_RIGHT);
+        assert!(right.x > 0.9 && (right.y - 0.5).abs() < 1e-9);
+        let down = p(&ARROW_DOWN);
+        assert!((down.x - 0.5).abs() < 1e-9 && down.y > 0.9);
+        let up = p(&ARROW_UP);
+        assert!((up.x - 0.5).abs() < 1e-9 && up.y < 0.1);
+        let angle_down = p(&ARROW_ANGLE_DOWN);
+        assert!(angle_down.x > 0.7 && angle_down.y > 0.7);
+        let angle_up = p(&ARROW_ANGLE_UP);
+        assert!(angle_up.x > 0.7 && angle_up.y < 0.3);
     }
 }

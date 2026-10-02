@@ -341,7 +341,8 @@ fn paint_glyph<P: Painter + ?Sized>(
         IconGlyph::ThumbsDown => &cf::THUMBS_DOWN,
     };
     let size = f64::from(size);
-    let Some(place) = Placement::fit(f64::from(left), f64::from(top), size, size, 0.0) else {
+    let Some(place) = Placement::fit(f64::from(left), f64::from(top), size, size, def.rotation)
+    else {
         return;
     };
     let color = PaintColor::Borrowed(color);
