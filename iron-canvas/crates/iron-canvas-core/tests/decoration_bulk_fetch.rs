@@ -426,6 +426,48 @@ fn circle_icon_paints_a_native_circle() {
     );
 }
 
+/// Every engine glyph variant maps to a shared definition that paints at
+/// least one primitive. Guards the exhaustive dispatch in `paint_glyph` and
+/// the `shape::cf` definitions.
+#[test]
+fn every_icon_glyph_paints_something() {
+    use IconGlyph::*;
+    let glyphs = [
+        ArrowUp,
+        ArrowRight,
+        ArrowDown,
+        ArrowAngleUp,
+        ArrowAngleDown,
+        Circle,
+        TriangleUp,
+        TriangleDown,
+        TriangleUpFilled,
+        TriangleDownFilled,
+        FlatRectangle,
+        Rhombus,
+        Flag,
+        Check,
+        Cross,
+        Exclamation,
+        Star,
+        Heart,
+        ThumbsUp,
+        ThumbsDown,
+    ];
+    for glyph in glyphs {
+        let mut decoration = icon_decoration();
+        decoration.icon.as_mut().expect("icon").glyph = glyph;
+        let (core, _) = render_cell(decoration);
+        let painted = core.painter().ops().iter().any(|op| {
+            matches!(
+                op,
+                DrawOp::FillPath { .. } | DrawOp::FillCircle { .. } | DrawOp::StrokePath { .. }
+            )
+        });
+        assert!(painted, "{glyph:?} painted no primitive");
+    }
+}
+
 #[test]
 fn chevrons_are_distinct_from_filled_triangles() {
     for (chevron, filled) in [

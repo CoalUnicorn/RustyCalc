@@ -14,6 +14,7 @@ pub mod model;
 mod orchestrator;
 pub mod painter;
 pub mod renderer;
+pub mod shape;
 mod style;
 pub mod surface;
 pub mod theme;

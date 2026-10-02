@@ -21,6 +21,8 @@ use crate::geometry::prim::Point;
 use crate::painter::{LineCap, LineJoin, PaintColor, Painter, StrokeStyle};
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::cache::color::{css_rgb, data_bar_rgb};
+use crate::shape::cf::{self, GlyphPart};
+use crate::shape::place::{Placement, emit_poly, star_vertices};
 use crate::style::{CellDecoration, IconGlyph};
 
 /// Resolved icon decoration: the engine-selected glyph and its resolved,
@@ -298,9 +300,13 @@ fn paint_data_bar<P: Painter + ?Sized>(painter: &P, rect: PixelRect, bar: &CfDat
     }
 }
 
-/// Paint one glyph as filled polygons in the `size`×`size` box at `(left,
-/// top)`. Icon geometry is backend-neutral vector work: no font, no glyph
-/// asset, no browser-only API.
+/// Paint one glyph into the `size`×`size` box at `(left, top)`.
+///
+/// The exhaustive `IconGlyph` dispatch lives here: it selects the shared
+/// unit-box definition from [`shape::cf`] and drives the painter through
+/// [`shape::place`]. The glyph box is square, so the uniform fit fills it and
+/// the current definitions need no rotation. Icon geometry is backend-neutral
+/// vector work: no font, no glyph asset, no browser-only API.
 fn paint_glyph<P: Painter + ?Sized>(
     painter: &P,
     glyph: IconGlyph,
@@ -312,205 +318,74 @@ fn paint_glyph<P: Painter + ?Sized>(
     if size <= 0 {
         return;
     }
-    let canvas = GlyphCanvas {
-        painter,
-        left: f64::from(left),
-        top: f64::from(top),
-        size: f64::from(size),
-        color,
+    let def = match glyph {
+        IconGlyph::ArrowUp => &cf::ARROW_UP,
+        IconGlyph::ArrowRight => &cf::ARROW_RIGHT,
+        IconGlyph::ArrowDown => &cf::ARROW_DOWN,
+        IconGlyph::ArrowAngleUp => &cf::ARROW_ANGLE_UP,
+        IconGlyph::ArrowAngleDown => &cf::ARROW_ANGLE_DOWN,
+        IconGlyph::Circle => &cf::CIRCLE,
+        IconGlyph::TriangleUp => &cf::TRIANGLE_UP,
+        IconGlyph::TriangleDown => &cf::TRIANGLE_DOWN,
+        IconGlyph::TriangleUpFilled => &cf::TRIANGLE_UP_FILLED,
+        IconGlyph::TriangleDownFilled => &cf::TRIANGLE_DOWN_FILLED,
+        IconGlyph::FlatRectangle => &cf::FLAT_RECTANGLE,
+        IconGlyph::Rhombus => &cf::RHOMBUS,
+        IconGlyph::Flag => &cf::FLAG,
+        IconGlyph::Check => &cf::CHECK,
+        IconGlyph::Cross => &cf::CROSS,
+        IconGlyph::Exclamation => &cf::EXCLAMATION,
+        IconGlyph::Star => &cf::STAR,
+        IconGlyph::Heart => &cf::HEART,
+        IconGlyph::ThumbsUp => &cf::THUMBS_UP,
+        IconGlyph::ThumbsDown => &cf::THUMBS_DOWN,
     };
-    match glyph {
-        IconGlyph::ArrowUp => {
-            canvas.poly(&ARROW_UP_HEAD);
-            canvas.poly(&ARROW_UP_SHAFT);
+    let size = f64::from(size);
+    let Some(place) = Placement::fit(f64::from(left), f64::from(top), size, size, 0.0) else {
+        return;
+    };
+    let color = PaintColor::Borrowed(color);
+    // One bounded stack buffer, reused by every part: no per-glyph `Vec`.
+    let mut buf = [PathCmd::Close; cf::MAX_PART_CMDS];
+    for part in def.parts {
+        match part {
+            GlyphPart::Poly(vertices) => {
+                let Some(n) = emit_poly(vertices, &place, &mut buf) else {
+                    debug_assert!(false, "a glyph part exceeds MAX_PART_CMDS");
+                    continue;
+                };
+                painter.fill_path(&Path::new(&buf[..n]), color);
+            }
+            GlyphPart::Segment { from, to, half } => {
+                let a = place.point(PointF::new(from.0, from.1));
+                let b = place.point(PointF::new(to.0, to.1));
+                if (b.x - a.x).hypot(b.y - a.y) <= f64::EPSILON {
+                    continue;
+                }
+                buf[0] = PathCmd::Move(a);
+                buf[1] = PathCmd::Line(b);
+                let style = StrokeStyle {
+                    width: 2.0 * place.length(*half),
+                    cap: LineCap::Butt,
+                    join: LineJoin::Miter,
+                    miter_limit: 10.0,
+                    dash: &[],
+                };
+                painter.stroke_path(&Path::new(&buf[..2]), color, &style);
+            }
+            GlyphPart::Circle { radius } => {
+                let c = place.point(PointF::new(0.5, 0.5));
+                painter.fill_circle(c.x, c.y, place.length(*radius), color);
+            }
+            GlyphPart::Star { inner } => {
+                let vertices = star_vertices(*inner);
+                let Some(n) = emit_poly(&vertices, &place, &mut buf) else {
+                    debug_assert!(false, "the star exceeds MAX_PART_CMDS");
+                    continue;
+                };
+                painter.fill_path(&Path::new(&buf[..n]), color);
+            }
         }
-        IconGlyph::ArrowDown => {
-            canvas.poly(&ARROW_DOWN_HEAD);
-            canvas.poly(&ARROW_DOWN_SHAFT);
-        }
-        IconGlyph::ArrowRight => {
-            canvas.poly(&ARROW_RIGHT_HEAD);
-            canvas.poly(&ARROW_RIGHT_SHAFT);
-        }
-        IconGlyph::ArrowAngleUp => {
-            canvas.poly(&ARROW_ANGLE_UP_HEAD);
-            canvas.segment((0.06, 0.94), (0.56, 0.44), 0.11);
-        }
-        IconGlyph::ArrowAngleDown => {
-            canvas.poly(&ARROW_ANGLE_DOWN_HEAD);
-            canvas.segment((0.06, 0.06), (0.56, 0.56), 0.11);
-        }
-        IconGlyph::Circle => canvas.circle(0.5),
-        IconGlyph::TriangleUp => {
-            canvas.segment((0.20, 0.65), (0.50, 0.35), 0.05);
-            canvas.segment((0.50, 0.35), (0.80, 0.65), 0.05);
-        }
-        IconGlyph::TriangleDown => {
-            canvas.segment((0.20, 0.35), (0.50, 0.65), 0.05);
-            canvas.segment((0.50, 0.65), (0.80, 0.35), 0.05);
-        }
-        IconGlyph::TriangleUpFilled => {
-            canvas.poly(&[(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)]);
-        }
-        IconGlyph::TriangleDownFilled => {
-            canvas.poly(&[(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)]);
-        }
-        IconGlyph::FlatRectangle => {
-            canvas.poly(&[(0.02, 0.36), (0.98, 0.36), (0.98, 0.64), (0.02, 0.64)]);
-        }
-        IconGlyph::Rhombus => {
-            canvas.poly(&[(0.5, 0.02), (0.98, 0.5), (0.5, 0.98), (0.02, 0.5)]);
-        }
-        IconGlyph::Flag => {
-            canvas.poly(&[(0.12, 0.02), (0.24, 0.02), (0.24, 0.98), (0.12, 0.98)]);
-            canvas.poly(&[
-                (0.24, 0.06),
-                (0.96, 0.18),
-                (0.78, 0.42),
-                (0.96, 0.66),
-                (0.24, 0.66),
-            ]);
-        }
-        IconGlyph::Check => {
-            canvas.segment((0.12, 0.55), (0.40, 0.85), 0.11);
-            canvas.segment((0.40, 0.85), (0.90, 0.16), 0.11);
-        }
-        IconGlyph::Cross => {
-            canvas.segment((0.16, 0.16), (0.84, 0.84), 0.12);
-            canvas.segment((0.84, 0.16), (0.16, 0.84), 0.12);
-        }
-        IconGlyph::Exclamation => {
-            canvas.poly(&[(0.42, 0.06), (0.58, 0.06), (0.58, 0.64), (0.42, 0.64)]);
-            canvas.poly(&[(0.42, 0.76), (0.58, 0.76), (0.58, 0.94), (0.42, 0.94)]);
-        }
-        IconGlyph::Star => canvas.star(),
-        IconGlyph::Heart => {
-            canvas.poly(&[
-                (0.5, 0.94),
-                (0.08, 0.52),
-                (0.04, 0.30),
-                (0.16, 0.10),
-                (0.36, 0.08),
-                (0.5, 0.26),
-                (0.64, 0.08),
-                (0.84, 0.10),
-                (0.96, 0.30),
-                (0.92, 0.52),
-            ]);
-        }
-        IconGlyph::ThumbsUp => {
-            canvas.poly(&[(0.08, 0.36), (0.26, 0.36), (0.26, 0.94), (0.08, 0.94)]);
-            canvas.poly(&[(0.32, 0.44), (0.74, 0.44), (0.74, 0.94), (0.32, 0.94)]);
-            canvas.poly(&[(0.44, 0.06), (0.62, 0.06), (0.62, 0.44), (0.44, 0.44)]);
-        }
-        IconGlyph::ThumbsDown => {
-            canvas.poly(&[(0.08, 0.06), (0.26, 0.06), (0.26, 0.64), (0.08, 0.64)]);
-            canvas.poly(&[(0.32, 0.06), (0.74, 0.06), (0.74, 0.56), (0.32, 0.56)]);
-            canvas.poly(&[(0.44, 0.56), (0.62, 0.56), (0.62, 0.94), (0.44, 0.94)]);
-        }
-    }
-}
-
-// Arrow glyphs: a triangular head plus a rectangular shaft, in a unit box
-// (x right, y down).
-const ARROW_UP_HEAD: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.52), (0.02, 0.52)];
-const ARROW_UP_SHAFT: [(f64, f64); 4] = [(0.38, 0.42), (0.62, 0.42), (0.62, 0.98), (0.38, 0.98)];
-const ARROW_DOWN_HEAD: [(f64, f64); 3] = [(0.5, 0.98), (0.98, 0.48), (0.02, 0.48)];
-const ARROW_DOWN_SHAFT: [(f64, f64); 4] = [(0.38, 0.02), (0.62, 0.02), (0.62, 0.58), (0.38, 0.58)];
-const ARROW_RIGHT_HEAD: [(f64, f64); 3] = [(0.98, 0.5), (0.48, 0.02), (0.48, 0.98)];
-const ARROW_RIGHT_SHAFT: [(f64, f64); 4] = [(0.02, 0.38), (0.58, 0.38), (0.58, 0.62), (0.02, 0.62)];
-const ARROW_ANGLE_UP_HEAD: [(f64, f64); 3] = [(1.0, 0.02), (0.40, 0.06), (0.96, 0.60)];
-const ARROW_ANGLE_DOWN_HEAD: [(f64, f64); 3] = [(1.0, 0.98), (0.40, 0.94), (0.96, 0.40)];
-
-/// Maps unit-box coordinates onto the pixel glyph box and fills polygons.
-struct GlyphCanvas<'a, P: Painter + ?Sized> {
-    painter: &'a P,
-    left: f64,
-    top: f64,
-    size: f64,
-    color: &'a str,
-}
-
-impl<P: Painter + ?Sized> GlyphCanvas<'_, P> {
-    /// Fill the closed polygon whose vertices are unit-box coordinates.
-    ///
-    /// Vertices keep float precision: the old integer `Point` rounding turned
-    /// a curve or a rotated edge into a visually faceted polygon.
-    fn poly(&self, unit: &[(f64, f64)]) {
-        const MAX_VERTICES: usize = 32;
-        let count = unit.len().min(MAX_VERTICES);
-        if count == 0 {
-            return;
-        }
-        // Move + one Line per remaining vertex + Close, in one bounded stack
-        // buffer. The slice below excludes the unused slots, so the
-        // placeholder value never reaches the painter and no `Vec` is needed
-        // in the paint loop.
-        let mut cmds = [PathCmd::Close; MAX_VERTICES + 1];
-        cmds[0] = PathCmd::Move(self.point(unit[0]));
-        for (slot, (u, v)) in cmds[1..count].iter_mut().zip(unit[1..count].iter()) {
-            *slot = PathCmd::Line(self.point((*u, *v)));
-        }
-        cmds[count] = PathCmd::Close;
-        self.painter.fill_path(
-            &Path::new(&cmds[..count + 1]),
-            PaintColor::Borrowed(self.color),
-        );
-    }
-
-    /// Map a unit-box coordinate onto the glyph box in float pixel space.
-    fn point(&self, (u, v): (f64, f64)) -> PointF {
-        PointF {
-            x: self.left + u * self.size,
-            y: self.top + v * self.size,
-        }
-    }
-
-    /// Stroke the segment from `a` to `b` (unit coords) with `half`
-    /// half-thickness, as a butt-capped stroke of width `2 * half` scaled into
-    /// the glyph box. Butt caps reproduce the old perpendicular quad exactly,
-    /// so the appearance is unchanged; the segments stay independent until a
-    /// joined shape passes the phase-3 appearance check.
-    fn segment(&self, a: (f64, f64), b: (f64, f64), half: f64) {
-        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        if (dx * dx + dy * dy).sqrt() <= f64::EPSILON {
-            return;
-        }
-        let path = [PathCmd::Move(self.point(a)), PathCmd::Line(self.point(b))];
-        let style = StrokeStyle {
-            width: 2.0 * half * self.size,
-            cap: LineCap::Butt,
-            join: LineJoin::Miter,
-            miter_limit: 10.0,
-            dash: &[],
-        };
-        self.painter
-            .stroke_path(&Path::new(&path), PaintColor::Borrowed(self.color), &style);
-    }
-
-    /// Fill a disc of `radius` (a unit-box fraction) centred in the glyph
-    /// box, through the painter's native circle primitive. `poly` would
-    /// round the arc to integer pixels and show a visible polygon; the
-    /// native op keeps the edge smooth at any size or device pixel ratio.
-    fn circle(&self, radius: f64) {
-        let center = 0.5 * self.size;
-        self.painter.fill_circle(
-            self.left + center,
-            self.top + center,
-            radius * self.size,
-            PaintColor::Borrowed(self.color),
-        );
-    }
-
-    /// Fill a five-pointed star inscribed in the unit box.
-    fn star(&self) {
-        let mut points = [(0.0, 0.0); 10];
-        for (k, slot) in points.iter_mut().enumerate() {
-            let r = if k % 2 == 0 { 0.5 } else { 0.5 * 0.382 };
-            let angle = -std::f64::consts::FRAC_PI_2 + (k as f64) * std::f64::consts::PI / 5.0;
-            *slot = (0.5 + r * angle.cos(), 0.5 + r * angle.sin());
-        }
-        self.poly(&points);
     }
 }
 
