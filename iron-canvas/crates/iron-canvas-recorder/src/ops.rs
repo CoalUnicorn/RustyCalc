@@ -56,6 +56,12 @@ pub enum DrawOp {
         points: Vec<Point>,
         color: String,
     },
+    FillCircle {
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        color: String,
+    },
     ClearRect {
         rect: PixelRect,
     },
@@ -149,6 +155,14 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
             }
             DrawOp::FillPath { points, color } => {
                 target.fill_path(points, PaintColor::Borrowed(color));
+            }
+            DrawOp::FillCircle {
+                cx,
+                cy,
+                radius,
+                color,
+            } => {
+                target.fill_circle(*cx, *cy, *radius, PaintColor::Borrowed(color));
             }
             DrawOp::ClearRect { rect } => target.clear_rect(*rect),
             DrawOp::RectStroke { rect, color, width } => {

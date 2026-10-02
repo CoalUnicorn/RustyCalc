@@ -363,6 +363,19 @@ impl Painter for CanvasPainter {
         self.ctx.fill();
     }
 
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
+        if !radius.is_finite() || radius <= 0.0 {
+            return; // non-finite or non-positive radius is a no-op
+        }
+        self.set_fill_cached(color);
+        self.ctx.begin_path();
+        // A full turn; `fill` closes the subpath, so no `close_path` needed.
+        // `arc` rejects only a negative radius, which the guard above rules
+        // out.
+        let _ = self.ctx.arc(cx, cy, radius, 0.0, std::f64::consts::TAU);
+        self.ctx.fill();
+    }
+
     fn clear_rect(&self, rect: PixelRect) {
         let (x, y, w, h) = rect.as_f64_tuple();
         self.ctx.clear_rect(x, y, w, h);

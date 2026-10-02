@@ -184,6 +184,19 @@ impl Painter for SvgPainter {
         body.push_str("\"/>");
     }
 
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
+        if !radius.is_finite() || radius <= 0.0 {
+            return;
+        }
+        let mut body = self.body.borrow_mut();
+        let _ = write!(
+            body,
+            "<circle cx=\"{cx:.3}\" cy=\"{cy:.3}\" r=\"{radius:.3}\" fill=\""
+        );
+        xml_escape(color.as_str(), &mut body);
+        body.push_str("\"/>");
+    }
+
     fn clear_rect(&self, _rect: PixelRect) {
         // SVG has no concept of clearing alpha pixels; emitted elements
         // simply compose on top. The overlay-clear contract is a no-op here.
@@ -599,6 +612,29 @@ mod tests {
         );
         let svg = p.finish();
         assert!(!svg.contains("linearGradient"), "{svg}");
+    }
+
+    #[test]
+    fn circle_emits_a_native_circle_element() {
+        let p = SvgPainter::new(100, 50);
+        p.fill_circle(20.0, 10.0, 4.5, PaintColor::Static("#84cb1f"));
+        let svg = p.finish();
+        assert!(
+            svg.contains("<circle cx=\"20.000\" cy=\"10.000\" r=\"4.500\""),
+            "{svg}"
+        );
+        assert!(svg.contains("fill=\"#84cb1f\""), "{svg}");
+        assert!(
+            !svg.contains("<path"),
+            "a circle must not fall back to a polygon: {svg}"
+        );
+    }
+
+    #[test]
+    fn non_positive_circle_radius_emits_nothing() {
+        let p = SvgPainter::new(100, 50);
+        p.fill_circle(20.0, 10.0, 0.0, PaintColor::Static("#000000"));
+        assert!(!p.finish().contains("<circle"));
     }
 
     #[test]

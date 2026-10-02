@@ -339,7 +339,7 @@ fn paint_glyph<P: Painter + ?Sized>(
             canvas.poly(&ARROW_ANGLE_DOWN_HEAD);
             canvas.segment((0.06, 0.06), (0.56, 0.56), 0.11);
         }
-        IconGlyph::Circle => canvas.disc(24, 0.5),
+        IconGlyph::Circle => canvas.circle(0.5),
         IconGlyph::TriangleUp => {
             canvas.segment((0.20, 0.65), (0.50, 0.35), 0.05);
             canvas.segment((0.50, 0.35), (0.80, 0.65), 0.05);
@@ -463,15 +463,18 @@ impl<P: Painter + ?Sized> GlyphCanvas<'_, P> {
         ]);
     }
 
-    /// Fill a `segments`-sided polygon approximating a disc of `radius`.
-    fn disc(&self, segments: usize, radius: f64) {
-        let mut points = [(0.0, 0.0); 24];
-        let count = segments.min(points.len());
-        for (i, slot) in points.iter_mut().enumerate().take(count) {
-            let angle = i as f64 / count as f64 * std::f64::consts::TAU;
-            *slot = (0.5 + radius * angle.cos(), 0.5 + radius * angle.sin());
-        }
-        self.poly(&points[..count]);
+    /// Fill a disc of `radius` (a unit-box fraction) centred in the glyph
+    /// box, through the painter's native circle primitive. `poly` would
+    /// round the arc to integer pixels and show a visible polygon; the
+    /// native op keeps the edge smooth at any size or device pixel ratio.
+    fn circle(&self, radius: f64) {
+        let center = 0.5 * self.size;
+        self.painter.fill_circle(
+            self.left + center,
+            self.top + center,
+            radius * self.size,
+            PaintColor::Borrowed(self.color),
+        );
     }
 
     /// Fill a five-pointed star inscribed in the unit box.

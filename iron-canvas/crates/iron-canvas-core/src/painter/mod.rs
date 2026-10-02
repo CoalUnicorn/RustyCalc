@@ -150,7 +150,7 @@ pub trait TextMetrics {
 }
 
 #[diagnostic::on_unimplemented(
-    note = "implement the full `Painter` drawing surface (rect/path fills, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
+    note = "implement the full `Painter` drawing surface (rect/circle/path fills, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
@@ -164,7 +164,18 @@ pub trait Painter: TextMetrics {
     /// Fill the closed polygon defined by `points`, in pixel space. The path
     /// implicitly closes from `points.last()` to `points.first()`. Empty or
     /// single-point input is a no-op.
+    ///
+    /// Every point is an integer pixel, so this cannot represent a smooth
+    /// curve. Use [`Self::fill_circle`] for round shapes.
     fn fill_path(&self, points: &[Point], color: PaintColor);
+    /// Fill the circle centred at `(cx, cy)` with the given `radius`, both in
+    /// logical pixels. A non-positive radius is a no-op. Every backend draws
+    /// it with its own curve primitive (Canvas2D `arc`, SVG `<circle>`, PDF
+    /// four cubic Béziers), so the edge stays smooth at any zoom or device
+    /// pixel ratio. The renderer uses this for the round conditional-
+    /// formatting glyphs; [`Self::fill_path`] rounds to integer points and
+    /// shows a 24-gon instead.
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor);
     /// Clear the pixels under `rect` to fully transparent. Canvas-2D maps
     /// to `ctx.clearRect`; backends that don't compose alpha (SVG, Recorder)
     /// may no-op.

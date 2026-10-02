@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v7)
+//! # On-disk layout (v9)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":8,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":9,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `8`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `9`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -81,7 +81,11 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 8;
+///
+/// v9 adds the `DrawOp::FillCircle` variant. An older reader rejects the
+/// file rather than dropping the op, which would silently lose the round
+/// conditional-formatting glyphs.
+pub const ICR_SCHEMA_VERSION: u32 = 9;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,6 +379,9 @@ fn draw_op_numbers_are_finite(op: &DrawOp) -> bool {
             x1, x2, y, width, ..
         } => x1.is_finite() && x2.is_finite() && y.is_finite() && width.is_finite(),
         DrawOp::FillText { x, y, .. } => x.is_finite() && y.is_finite(),
+        DrawOp::FillCircle { cx, cy, radius, .. } => {
+            cx.is_finite() && cy.is_finite() && radius.is_finite()
+        }
         DrawOp::ApplyDprTransform { dpr } => dpr.is_finite() && *dpr > 0.0,
         DrawOp::RectFill { .. }
         | DrawOp::RectFillHGradient { .. }

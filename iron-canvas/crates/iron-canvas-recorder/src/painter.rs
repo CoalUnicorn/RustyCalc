@@ -92,6 +92,15 @@ impl Painter for RecorderPainter {
         });
     }
 
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
+        self.push(DrawOp::FillCircle {
+            cx,
+            cy,
+            radius,
+            color: color.as_str().to_string(),
+        });
+    }
+
     fn clear_rect(&self, rect: PixelRect) {
         self.push(DrawOp::ClearRect { rect });
     }

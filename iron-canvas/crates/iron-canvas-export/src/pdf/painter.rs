@@ -27,6 +27,10 @@ use crate::common::escape::pdf_string_escape;
 use crate::common::metrics;
 use crate::pdf::doc::stream::ContentStream;
 
+/// Control-point offset that turns one cubic Bézier into a quarter circle:
+/// `4/3 * (sqrt(2) - 1)`.
+const CIRCLE_KAPPA: f64 = 0.552_284_749_8;
+
 pub struct PdfPainter {
     body: Rc<RefCell<ContentStream>>,
     pub(super) width: u32,
@@ -217,6 +221,53 @@ impl Painter for PdfPainter {
             ));
         }
         self.write_str("h\nf\n"); // h closes the subpath; f fills
+    }
+
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
+        if !radius.is_finite() || radius <= 0.0 {
+            return;
+        }
+        self.emit_fill_color(color);
+        // Four quarter arcs, clockwise from the right-hand point. Each
+        // control point sits `CIRCLE_KAPPA * radius` along the tangent, the
+        // standard cubic approximation of a 90-degree arc (max radial error
+        // ~0.03%). The surface's Y-flip CTM mirrors the whole path; a circle
+        // is symmetric under that mirror, so the direction does not matter.
+        let k = CIRCLE_KAPPA * radius;
+        self.emit(format_args!(
+            "{:.3} {:.3} m\n\
+             {:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n\
+             {:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n\
+             {:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n\
+             {:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c\n\
+             h\nf\n",
+            cx + radius,
+            cy,
+            cx + radius,
+            cy + k,
+            cx + k,
+            cy + radius,
+            cx,
+            cy + radius,
+            cx - k,
+            cy + radius,
+            cx - radius,
+            cy + k,
+            cx - radius,
+            cy,
+            cx - radius,
+            cy - k,
+            cx - k,
+            cy - radius,
+            cx,
+            cy - radius,
+            cx + k,
+            cy - radius,
+            cx + radius,
+            cy - k,
+            cx + radius,
+            cy,
+        ));
     }
 
     fn clear_rect(&self, rect: PixelRect) {
@@ -456,6 +507,37 @@ mod tests {
             PaintColor::Static("#000000"),
         );
         assert!(painter.shadings().borrow().is_empty());
+        assert!(content(&painter).is_empty());
+    }
+
+    #[test]
+    fn circle_emits_four_arcs_and_fills() {
+        let painter = PdfPainter::new(100, 50);
+        painter.fill_circle(20.0, 10.0, 5.0, PaintColor::Static("#84cb1f"));
+        let content = content(&painter);
+        assert!(content.starts_with("0.518 0.796 0.122 rg\n"), "{content}");
+        assert!(
+            content.contains("25.000 10.000 m\n"),
+            "the path starts at the right-hand point: {content}"
+        );
+        assert_eq!(
+            content.matches(" c\n").count(),
+            4,
+            "four quarter arcs: {content}"
+        );
+        for point in ["20.000 15.000", "15.000 10.000", "20.000 5.000"] {
+            assert!(
+                content.contains(&format!("{point} c")),
+                "missing arc endpoint {point}: {content}"
+            );
+        }
+        assert!(content.ends_with("h\nf\n"), "{content}");
+    }
+
+    #[test]
+    fn non_positive_circle_radius_emits_nothing() {
+        let painter = PdfPainter::new(100, 50);
+        painter.fill_circle(20.0, 10.0, 0.0, PaintColor::Static("#000000"));
         assert!(content(&painter).is_empty());
     }
 }

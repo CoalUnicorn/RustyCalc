@@ -89,6 +89,7 @@ mod tests {
             ],
             PaintColor::Static("#abc"),
         );
+        src.fill_circle(5.0, 5.0, 3.0, PaintColor::Static("#abcdef"));
         src.clear_rect(r);
         src.rect_stroke(r, PaintColor::Static("#00ff00"), 1.0);
         src.rect_dashed(r, PaintColor::Static("#0000ff"), 2.0);

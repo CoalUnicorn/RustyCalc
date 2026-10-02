@@ -231,6 +231,7 @@ impl OpCounts {
                 DrawOp::RectFill { .. }
                 | DrawOp::RectFillHGradient { .. }
                 | DrawOp::FillPath { .. }
+                | DrawOp::FillCircle { .. }
                 | DrawOp::ClearRect { .. } => {
                     counts.fills += 1;
                 }

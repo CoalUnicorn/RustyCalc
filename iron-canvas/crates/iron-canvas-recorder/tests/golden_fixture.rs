@@ -85,6 +85,12 @@ fn build_fixture() -> Recording {
             from: "#adc2eb".to_string(),
             to: "#3366cc".to_string(),
         },
+        DrawOp::FillCircle {
+            cx: 120.0,
+            cy: 10.0,
+            radius: 8.0,
+            color: "#84cb1f".to_string(),
+        },
         DrawOp::StrokeHLine {
             span: Span { from: 0, to: 200 },
             y: 20.0,
@@ -417,9 +423,10 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_8() {
-    // Schema 8 adds the RectFillHGradient operation.
-    assert_eq!(ICR_SCHEMA_VERSION, 8);
+fn schema_version_is_pinned_at_9() {
+    // Schema 8 added the RectFillHGradient operation; schema 9 adds
+    // FillCircle.
+    assert_eq!(ICR_SCHEMA_VERSION, 9);
 }
 
 #[test]

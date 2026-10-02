@@ -364,6 +364,54 @@ fn icon_paints_its_glyph() {
     assert!(arrows > 0, "the icon must paint at least one polygon");
 }
 
+/// A round glyph paints through the native circle primitive, not a polygon:
+/// `fill_path` takes integer points, so the old 24-gon showed a faceted edge.
+#[test]
+fn circle_icon_paints_a_native_circle() {
+    let mut decoration = icon_decoration();
+    decoration.icon.as_mut().expect("icon").glyph = IconGlyph::Circle;
+    let (core, frame) = render_cell(decoration);
+    let rect = frame.cell_rect(2, 2).expect("the cell is visible");
+    let ops = core.painter().ops();
+
+    let circles: Vec<(f64, f64, f64)> = ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillCircle {
+                cx,
+                cy,
+                radius,
+                color,
+            } if color == "#84cb1f" => Some((*cx, *cy, *radius)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(circles.len(), 1, "one circle per round glyph");
+    assert!(
+        !ops.iter()
+            .any(|op| matches!(op, DrawOp::FillPath { color, .. } if color == "#84cb1f")),
+        "a round glyph must not also paint a polygon"
+    );
+
+    let (cx, cy, radius) = circles[0];
+    assert!(radius > 0.0, "radius {radius}");
+    let (x0, y0) = (cx - radius, cy - radius);
+    let (x1, y1) = (cx + radius, cy + radius);
+    assert!(
+        x0 >= f64::from(rect.left())
+            && x1 <= f64::from(rect.right())
+            && y0 >= f64::from(rect.top())
+            && y1 <= f64::from(rect.bottom()),
+        "circle {x0},{y0}-{x1},{y1} escapes the cell {rect:?}"
+    );
+    // The glyph sits in the reserved left band, so its edge starts just
+    // inside the cell's inner margin rather than at the value's column.
+    assert!(
+        x0 < f64::from(rect.left()) + 20.0,
+        "circle must stay in the left icon band"
+    );
+}
+
 #[test]
 fn chevrons_are_distinct_from_filled_triangles() {
     for (chevron, filled) in [

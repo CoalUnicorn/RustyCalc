@@ -125,6 +125,13 @@ impl<P: BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
+    fn fill_circle(&self, cx: f64, cy: f64, radius: f64, color: PaintColor) {
+        self.inner.fill_circle(cx, cy, radius, color);
+        if self.should_record() {
+            self.recorder.fill_circle(cx, cy, radius, color);
+        }
+    }
+
     fn clear_rect(&self, rect: PixelRect) {
         self.inner.clear_rect(rect);
         if self.should_record() {
