@@ -481,7 +481,7 @@ fn hash_decoration<H: Hasher>(decoration: &Fetched<CellDecoration>, hasher: &mut
                 None => hasher.write_u8(0),
                 Some(rating) => {
                     hasher.write_u8(1);
-                    rating.glyph.hash(hasher);
+                    rating.style.hash(hasher);
                     rating.color.as_deref().map(css_rgb).hash(hasher);
                     rating.count.hash(hasher);
                     rating.max.hash(hasher);

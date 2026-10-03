@@ -9,7 +9,8 @@
 
 use iron_canvas_core::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellLink, CellStyle,
-    DataBarSpec, FontStyle, HAlign, IconGlyph, IconSpec, LinkTarget, RCRange, RatingSpec, VAlign,
+    DataBarSpec, FontStyle, HAlign, IconGlyph, IconSpec, LinkTarget, RCRange, RatingSpec,
+    RatingStyle, VAlign,
 };
 use ironcalc_base::cf_types as ic_cf;
 use ironcalc_base::types as ic;
@@ -166,7 +167,10 @@ pub fn cell_decoration_from_parts(
             show_value: bar.show_value,
         }),
         rating: rating.map(|r| RatingSpec {
-            glyph: icon_glyph_from_ic(r.icon.clone()),
+            style: match &r.icon {
+                ic_cf::Icon::Circle => RatingStyle::FiveQuarters,
+                icon => RatingStyle::RepeatedGlyph(icon_glyph_from_ic(icon.clone())),
+            },
             color: resolve(&r.color),
             count: r.count,
             max: r.max,

@@ -179,16 +179,25 @@ pub struct DataBarSpec {
     pub show_value: bool,
 }
 
-/// One evaluated rating decoration. Most glyphs repeat `count` times out of
-/// `max`; a circle uses `count` as its rank in the scale.
+/// How one evaluated rating draws its mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RatingStyle {
+    /// Draw `count` copies of the selected glyph.
+    RepeatedGlyph(IconGlyph),
+    /// Draw the five-step quarter-circle rating set as one circle.
+    FiveQuarters,
+}
+
+/// One evaluated rating decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatingSpec {
-    pub glyph: IconGlyph,
+    pub style: RatingStyle,
     /// Resolved CSS color; `None` when the engine color is unresolved.
     pub color: Option<String>,
-    /// Engine `count`: number of glyphs, or the one-based circle rank.
+    /// Rating count from the engine. `RepeatedGlyph` uses it as a mark count.
+    /// `FiveQuarters` uses it as a tier count from the threshold checks.
     pub count: u32,
-    /// Engine `max`: total glyphs or circle ranks in the scale.
+    /// Total rating tiers from the engine.
     pub max: u32,
     /// When false, the painted cell value is hidden.
     pub show_value: bool,

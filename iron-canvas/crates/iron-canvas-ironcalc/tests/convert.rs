@@ -208,7 +208,10 @@ fn extended_style_preserves_all_decoration_categories() {
     assert!(!bar.show_value);
 
     let rating = deco.rating.as_ref().expect("rating preserved");
-    assert_eq!(rating.glyph, IconGlyph::Star);
+    assert_eq!(
+        rating.style,
+        iron_canvas_core::RatingStyle::RepeatedGlyph(IconGlyph::Star)
+    );
     assert_eq!(rating.color.as_deref(), Some("#ffd700"));
     assert_eq!((rating.count, rating.max), (3, 5));
     assert!(rating.show_value);

@@ -24,7 +24,7 @@ use crate::renderer::cache::ColorIntern;
 use crate::renderer::cache::color::{css_rgb, data_bar_rgb};
 use crate::shape::cf::{self, GlyphDef, GlyphPart};
 use crate::shape::place::{Placement, emit_poly, star_vertices};
-use crate::style::{CellDecoration, IconGlyph};
+use crate::style::{CellDecoration, IconGlyph, RatingStyle};
 
 /// Resolved icon decoration: the engine-selected glyph and its resolved,
 /// interned color.
@@ -54,11 +54,10 @@ pub struct CfDataBarPaint {
     pub show_value: bool,
 }
 
-/// Resolved rating. Most glyphs paint `count` copies; a circle paints one
-/// progress circle with its fill mapped from `count` and `max`.
+/// Resolved rating with its draw style and engine counts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CfRatingPaint {
-    pub glyph: IconGlyph,
+    pub style: RatingStyle,
     pub color: Rc<str>,
     pub count: u8,
     pub max: u8,
@@ -114,7 +113,7 @@ impl CfDecorationPaint {
                 }
             }),
             rating: deco.rating.map(|rating| CfRatingPaint {
-                glyph: rating.glyph,
+                style: rating.style,
                 color: intern.get_rgb(rating.color.as_deref().map(css_rgb).unwrap_or([0, 0, 0])),
                 count: rating.count.min(u32::from(u8::MAX)) as u8,
                 max: rating.max.min(u32::from(u8::MAX)) as u8,
@@ -157,10 +156,9 @@ impl CfDecorationPaint {
     fn glyph_count(&self) -> i32 {
         i32::from(self.icon.is_some())
             + self.rating.as_ref().map_or(0, |rating| {
-                if rating.glyph == IconGlyph::Circle {
-                    i32::from(circle_rating_fraction(rating.count, rating.max).is_some())
-                } else {
-                    i32::from(rating.count)
+                match rating.style {
+                    RatingStyle::RepeatedGlyph(_) => i32::from(rating.count),
+                    RatingStyle::FiveQuarters => i32::from(rating.max > 0),
                 }
             })
     }
@@ -187,20 +185,23 @@ impl CfDecorationPaint {
             left += size;
         }
         if let Some(rating) = &self.rating {
-            if rating.glyph == IconGlyph::Circle {
-                if left < inner.right()
-                    && let Some(fraction) = circle_rating_fraction(rating.count, rating.max)
-                {
-                    paint_circle_rating(painter, left, top, size, fraction, &rating.color);
-                }
-            } else {
-                let def = rating_def(rating.glyph);
-                for i in 0..i32::from(rating.count) {
-                    let glyph_left = left + i * size;
-                    if glyph_left >= inner.right() {
-                        break;
+            match rating.style {
+                RatingStyle::RepeatedGlyph(glyph) => {
+                    let def = rating_def(glyph);
+                    for i in 0..i32::from(rating.count) {
+                        let glyph_left = left + i * size;
+                        if glyph_left >= inner.right() {
+                            break;
+                        }
+                        paint_def(painter, &def, glyph_left, top, size, &rating.color);
                     }
-                    paint_def(painter, &def, glyph_left, top, size, &rating.color);
+                }
+                RatingStyle::FiveQuarters => {
+                    if left < inner.right()
+                        && let Some(fraction) = circle_rating_fraction(rating.count, rating.max)
+                    {
+                    paint_circle_rating(painter, left, top, size, fraction, &rating.color);
+                    }
                 }
             }
         }
@@ -354,19 +355,19 @@ fn rating_def(glyph: IconGlyph) -> GlyphDef {
     }
 }
 
-/// Map a one-based circle rating rank to its filled fraction.
+/// Map the engine's quarter-circle threshold count to a filled fraction.
 ///
-/// The five-quarter set uses an empty circle for rank one, then adds one
-/// quarter per rank. A one-rank scale is full when it has a value.
+/// IronCalc counts passed thresholds from zero. Counts zero and one select the
+/// lowest, empty-circle tier. Later tiers add one quarter, up to a full circle.
 fn circle_rating_fraction(count: u8, max: u8) -> Option<f64> {
-    if count == 0 || max == 0 {
+    if max == 0 {
         return None;
     }
     if max == 1 {
-        return Some(1.0);
+        return Some(f64::from(count > 0));
     }
-    let count = count.min(max);
-    Some(f64::from(count - 1) / f64::from(max - 1))
+    let tier = count.saturating_sub(1).min(max - 1);
+    Some(f64::from(tier) / f64::from(max - 1))
 }
 
 /// Paint one circle rating as a filled sector inside a stroked circle.
@@ -603,7 +604,7 @@ mod tests {
     fn rating_maps_count_out_of_max() {
         let deco = CellDecoration {
             rating: Some(RatingSpec {
-                glyph: IconGlyph::Star,
+                style: RatingStyle::RepeatedGlyph(IconGlyph::Star),
                 color: None,
                 count: 3,
                 max: 5,
@@ -615,7 +616,7 @@ mod tests {
             Some(CfDecorationPaint {
                 rating: Some(p), ..
             }) => {
-                assert_eq!(p.glyph, IconGlyph::Star);
+                assert_eq!(p.style, RatingStyle::RepeatedGlyph(IconGlyph::Star));
                 assert_eq!((p.count, p.max), (3, 5));
             }
             other => panic!("expected a rating, got {other:?}"),
@@ -624,11 +625,11 @@ mod tests {
 
     #[test]
     fn circle_rating_fills_one_quarter_per_rank() {
-        let fractions = (1..=5)
-            .map(|count| circle_rating_fraction(count, 5).expect("nonzero rank"))
+        let fractions = (0..=5)
+            .map(|count| circle_rating_fraction(count, 5).expect("valid scale"))
             .collect::<Vec<_>>();
 
-        assert_eq!(fractions, [0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(fractions, [0.0, 0.0, 0.25, 0.5, 0.75, 1.0]);
     }
 
     #[test]
@@ -637,7 +638,7 @@ mod tests {
             icon: None,
             data_bar: None,
             rating: Some(CfRatingPaint {
-                glyph: IconGlyph::Circle,
+                style: RatingStyle::FiveQuarters,
                 color: Rc::from("#000000"),
                 count: 5,
                 max: 5,
@@ -749,7 +750,7 @@ mod tests {
             icon: Some(icon(IconGlyph::Circle, None)),
             data_bar: Some(bar("#3366cc", 0.5, 0.0, false)),
             rating: Some(RatingSpec {
-                glyph: IconGlyph::Heart,
+                style: RatingStyle::RepeatedGlyph(IconGlyph::Heart),
                 color: None,
                 count: 2,
                 max: 5,

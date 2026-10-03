@@ -7,7 +7,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use iron_canvas_core::{CellDecoration, IconGlyph};
+use iron_canvas_core::{CellDecoration, IconGlyph, RatingStyle};
 use iron_canvas_ironcalc::color_resolver;
 use iron_canvas_ironcalc::convert::cell_decoration_from_extended;
 use ironcalc::import::load_from_xlsx;
@@ -113,7 +113,7 @@ fn ratings_carry_the_engine_glyph_color_and_counts() {
         .expect("L22 has a decoration")
         .rating
         .expect("L22 is a rating cell");
-    assert_eq!(star.glyph, IconGlyph::Star);
+    assert_eq!(star.style, RatingStyle::RepeatedGlyph(IconGlyph::Star));
     assert_eq!(
         star.color.as_deref().map(str::to_lowercase).as_deref(),
         Some("#ffd700")
@@ -124,6 +124,6 @@ fn ratings_carry_the_engine_glyph_color_and_counts() {
         .expect("M23 has a decoration")
         .rating
         .expect("M23 is a rating cell");
-    assert_eq!(circle.glyph, IconGlyph::Circle);
+    assert_eq!(circle.style, RatingStyle::FiveQuarters);
     assert_eq!((circle.count, circle.max), (2, 5));
 }

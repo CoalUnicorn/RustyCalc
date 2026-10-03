@@ -12,7 +12,9 @@ use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::geometry::path::{PathCmd, PointF};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec};
+use iron_canvas_core::{
+    CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec, RatingStyle,
+};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -61,7 +63,7 @@ fn bar(
 fn rating(count: u32, max: u32) -> CellDecoration {
     CellDecoration {
         rating: Some(RatingSpec {
-            glyph: IconGlyph::Star,
+            style: RatingStyle::RepeatedGlyph(IconGlyph::Star),
             color: None,
             count,
             max,
