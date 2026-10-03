@@ -179,15 +179,16 @@ pub struct DataBarSpec {
     pub show_value: bool,
 }
 
-/// One evaluated rating decoration: `count` filled glyphs out of `max`.
+/// One evaluated rating decoration. Most glyphs repeat `count` times out of
+/// `max`; a circle uses `count` as its rank in the scale.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatingSpec {
     pub glyph: IconGlyph,
     /// Resolved CSS color; `None` when the engine color is unresolved.
     pub color: Option<String>,
-    /// Number of filled glyphs (engine `count`).
+    /// Engine `count`: number of glyphs, or the one-based circle rank.
     pub count: u32,
-    /// Total glyphs in the scale (engine `max`).
+    /// Engine `max`: total glyphs or circle ranks in the scale.
     pub max: u32,
     /// When false, the painted cell value is hidden.
     pub show_value: bool,

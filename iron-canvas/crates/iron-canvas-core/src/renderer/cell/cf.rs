@@ -16,7 +16,7 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::rc::Rc;
 
-use crate::geometry::path::{Path, PathCmd, PointF};
+use crate::geometry::path::{ArcSpec, Path, PathCmd, PointF};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{LineCap, LineJoin, PaintColor, Painter, StrokeStyle};
@@ -54,7 +54,8 @@ pub struct CfDataBarPaint {
     pub show_value: bool,
 }
 
-/// Resolved rating: `count` copies of the selected glyph, out of `max`.
+/// Resolved rating. Most glyphs paint `count` copies; a circle paints one
+/// progress circle with its fill mapped from `count` and `max`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CfRatingPaint {
     pub glyph: IconGlyph,
@@ -155,16 +156,19 @@ impl CfDecorationPaint {
 
     fn glyph_count(&self) -> i32 {
         i32::from(self.icon.is_some())
-            + self
-                .rating
-                .as_ref()
-                .map_or(0, |rating| i32::from(rating.count))
+            + self.rating.as_ref().map_or(0, |rating| {
+                if rating.glyph == IconGlyph::Circle {
+                    i32::from(circle_rating_fraction(rating.count, rating.max).is_some())
+                } else {
+                    i32::from(rating.count)
+                }
+            })
     }
 
     /// Paint every present decoration over the already-filled cell `rect`,
     /// purely in `Painter` primitives. The renderer owns CF geometry so the
     /// backend stays primitive-only: data bars become a solid or gradient
-    /// rect, icons and ratings become `fill_path` polygons.
+    /// rects; icons and ratings become path and circle primitives.
     pub(crate) fn paint<P: Painter + ?Sized>(&self, painter: &P, rect: PixelRect) {
         // Background to foreground: the bar must not cover the glyphs.
         if let Some(bar) = &self.data_bar {
@@ -183,13 +187,21 @@ impl CfDecorationPaint {
             left += size;
         }
         if let Some(rating) = &self.rating {
-            let def = rating_def(rating.glyph);
-            for i in 0..i32::from(rating.count) {
-                let glyph_left = left + i * size;
-                if glyph_left >= inner.right() {
-                    break;
+            if rating.glyph == IconGlyph::Circle {
+                if left < inner.right()
+                    && let Some(fraction) = circle_rating_fraction(rating.count, rating.max)
+                {
+                    paint_circle_rating(painter, left, top, size, fraction, &rating.color);
                 }
-                paint_def(painter, &def, glyph_left, top, size, &rating.color);
+            } else {
+                let def = rating_def(rating.glyph);
+                for i in 0..i32::from(rating.count) {
+                    let glyph_left = left + i * size;
+                    if glyph_left >= inner.right() {
+                        break;
+                    }
+                    paint_def(painter, &def, glyph_left, top, size, &rating.color);
+                }
             }
         }
         if needs_clip {
@@ -340,6 +352,75 @@ fn rating_def(glyph: IconGlyph) -> GlyphDef {
         IconGlyph::FlatRectangle => cf::RATING_BAR,
         other => glyph_def(other),
     }
+}
+
+/// Map a one-based circle rating rank to its filled fraction.
+///
+/// The five-quarter set uses an empty circle for rank one, then adds one
+/// quarter per rank. A one-rank scale is full when it has a value.
+fn circle_rating_fraction(count: u8, max: u8) -> Option<f64> {
+    if count == 0 || max == 0 {
+        return None;
+    }
+    if max == 1 {
+        return Some(1.0);
+    }
+    let count = count.min(max);
+    Some(f64::from(count - 1) / f64::from(max - 1))
+}
+
+/// Paint one circle rating as a filled sector inside a stroked circle.
+fn paint_circle_rating<P: Painter + ?Sized>(
+    painter: &P,
+    left: i32,
+    top: i32,
+    size: i32,
+    fraction: f64,
+    color: &str,
+) {
+    if size <= 0 {
+        return;
+    }
+    let center = PointF::new(
+        f64::from(left) + f64::from(size) / 2.0,
+        f64::from(top) + f64::from(size) / 2.0,
+    );
+    let radius = f64::from(size) * 0.42;
+    let start_angle = -FRAC_PI_2;
+    let fill = PaintColor::Borrowed(color);
+    if fraction >= 1.0 {
+        painter.fill_circle(center.x, center.y, radius, fill);
+    } else if fraction > 0.0 {
+        let arc = ArcSpec::new(
+            center,
+            radius,
+            start_angle,
+            std::f64::consts::TAU * fraction,
+        );
+        let start = arc.start_point();
+        let sector = [
+            PathCmd::Move(center),
+            PathCmd::Line(start),
+            PathCmd::Arc(arc),
+            PathCmd::Close,
+        ];
+        painter.fill_path(&Path::new(&sector), fill);
+    }
+
+    let outline = ArcSpec::new(center, radius, 0.0, std::f64::consts::TAU);
+    let circle = [
+        PathCmd::Move(outline.start_point()),
+        PathCmd::Arc(outline),
+        PathCmd::Close,
+    ];
+    let style = StrokeStyle {
+        width: (f64::from(size) * 0.06).max(1.0),
+        cap: LineCap::Butt,
+        join: LineJoin::Round,
+        miter_limit: 10.0,
+        dash: &[],
+    };
+    painter.stroke_path(&Path::new(&circle), fill, &style);
 }
 
 /// Paint one glyph into the `size`×`size` box at `(left, top)`.
@@ -539,6 +620,32 @@ mod tests {
             }
             other => panic!("expected a rating, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn circle_rating_fills_one_quarter_per_rank() {
+        let fractions = (1..=5)
+            .map(|count| circle_rating_fraction(count, 5).expect("nonzero rank"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(fractions, [0.0, 0.25, 0.5, 0.75, 1.0]);
+    }
+
+    #[test]
+    fn circle_rating_uses_one_slot_instead_of_repeating() {
+        let decoration = CfDecorationPaint {
+            icon: None,
+            data_bar: None,
+            rating: Some(CfRatingPaint {
+                glyph: IconGlyph::Circle,
+                color: Rc::from("#000000"),
+                count: 5,
+                max: 5,
+                show_value: true,
+            }),
+        };
+
+        assert_eq!(decoration.glyph_count(), 1);
     }
 
     #[test]
