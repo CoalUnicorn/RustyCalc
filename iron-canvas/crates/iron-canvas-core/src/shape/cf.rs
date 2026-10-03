@@ -70,8 +70,16 @@ const ARROW_PARTS: [GlyphPart; 2] = [GlyphPart::Poly(&ARROW_HEAD), GlyphPart::Po
 
 const TRIANGLE_UP_FILLED_VERTS: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)];
 const TRIANGLE_DOWN_FILLED_VERTS: [(f64, f64); 3] = [(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)];
+// The flat bar used by the `3Triangles` middle icon and, padded, by the
+// rating sets (`Ratings4`, `Ratings5`, `Bozes5`, …). The icon-set bar spans
+// the box; the rating bar leaves a gap because the renderer tiles one copy
+// per rating point and neighbours would otherwise merge.
 const FLAT_RECTANGLE_VERTS: [(f64, f64); 4] =
     [(0.02, 0.36), (0.98, 0.36), (0.98, 0.64), (0.02, 0.64)];
+// ~0.66 of the slot, centred, so the gap splits evenly between neighbours.
+// The IronCalc app reference draws each rating dash at 0.66 of its slot
+// (measured 9.5 px dash, 4.8 px gap) with the same relative thickness.
+const RATING_BAR_VERTS: [(f64, f64); 4] = [(0.17, 0.36), (0.83, 0.36), (0.83, 0.64), (0.17, 0.64)];
 const RHOMBUS_VERTS: [(f64, f64); 4] = [(0.5, 0.02), (0.98, 0.5), (0.5, 0.98), (0.02, 0.5)];
 const FLAG_POLE: [(f64, f64); 4] = [(0.12, 0.02), (0.24, 0.02), (0.24, 0.98), (0.12, 0.98)];
 const FLAG_BANNER: [(f64, f64); 5] = [
@@ -177,6 +185,14 @@ pub const FLAT_RECTANGLE: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&FLAT_RECTANGLE_VERTS)],
     rotation: 0.0,
 };
+
+/// The rating-bar glyph: the padded bar the rating renderer tiles. Not an
+/// `IconGlyph` on its own; the renderer selects it for a rating whose glyph
+/// is `IconGlyph::FlatRectangle`.
+pub const RATING_BAR: GlyphDef = GlyphDef {
+    parts: &[GlyphPart::Poly(&RATING_BAR_VERTS)],
+    rotation: 0.0,
+};
 pub const RHOMBUS: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Poly(&RHOMBUS_VERTS)],
     rotation: 0.0,
@@ -280,7 +296,7 @@ mod tests {
 
     #[test]
     fn every_glyph_fits_the_placement_buffer() {
-        for def in ALL {
+        for def in ALL.iter().copied().chain([&RATING_BAR]) {
             for part in def.parts {
                 assert!(
                     part.cmd_count() <= MAX_PART_CMDS,

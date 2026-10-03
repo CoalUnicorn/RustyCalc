@@ -468,6 +468,66 @@ fn every_icon_glyph_paints_something() {
     }
 }
 
+/// A rating whose glyph is the flat bar (`Bozes5`, `Ratings4`, `Ratings5`)
+/// tiles padded bars: neighbouring points must not merge into one bar.
+#[test]
+fn rating_bars_leave_a_gap_between_points() {
+    let mut decoration = rating(3, 5);
+    decoration.rating.as_mut().expect("rating").glyph = IconGlyph::FlatRectangle;
+    let (core, _) = render_cell(decoration);
+
+    let bars: Vec<Vec<PointF>> = core
+        .painter()
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillPath { path, color } if color == "#000000" => Some(path_points(path)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bars.len(), 3, "one bar per filled rating point");
+
+    let span = |bar: &[PointF]| {
+        let min = bar.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let max = bar.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        (min, max)
+    };
+    // The glyph slot is 20 px (row height 24 minus the 2 px inset each side),
+    // so the padded bar is ~13 px wide with a ~7 px gap.
+    for bar in &bars {
+        let (min, max) = span(bar);
+        assert!(max - min < 16.0, "rating bar fills its slot: {}", max - min);
+    }
+    let (_, right0) = span(&bars[0]);
+    let (left1, _) = span(&bars[1]);
+    assert!(left1 > right0, "neighbouring rating bars touch");
+}
+
+/// The icon-set flat bar (`3Triangles` middle) still spans its box; only the
+/// rating path pads it.
+#[test]
+fn icon_set_flat_bar_spans_its_slot() {
+    let mut decoration = icon_decoration();
+    decoration.icon.as_mut().expect("icon").glyph = IconGlyph::FlatRectangle;
+    let (core, _) = render_cell(decoration);
+    let bar = core
+        .painter()
+        .ops()
+        .iter()
+        .find_map(|op| match op {
+            DrawOp::FillPath { path, color } if color == "#84cb1f" => Some(path_points(path)),
+            _ => None,
+        })
+        .expect("the icon bar paints");
+    let min = bar.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+    let max = bar.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        max - min > 18.0,
+        "icon bar should fill its slot: {}",
+        max - min
+    );
+}
+
 #[test]
 fn chevrons_are_distinct_from_filled_triangles() {
     for (chevron, filled) in [

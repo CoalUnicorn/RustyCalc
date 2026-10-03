@@ -21,7 +21,7 @@ use crate::geometry::prim::Point;
 use crate::painter::{LineCap, LineJoin, PaintColor, Painter, StrokeStyle};
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::cache::color::{css_rgb, data_bar_rgb};
-use crate::shape::cf::{self, GlyphPart};
+use crate::shape::cf::{self, GlyphDef, GlyphPart};
 use crate::shape::place::{Placement, emit_poly, star_vertices};
 use crate::style::{CellDecoration, IconGlyph};
 
@@ -187,7 +187,14 @@ impl CfDecorationPaint {
                 if glyph_left >= inner.right() {
                     break;
                 }
-                paint_glyph(painter, rating.glyph, glyph_left, top, size, &rating.color);
+                paint_def(
+                    painter,
+                    rating_def(rating.glyph),
+                    glyph_left,
+                    top,
+                    size,
+                    &rating.color,
+                );
             }
         }
         if needs_clip {
@@ -300,25 +307,13 @@ fn paint_data_bar<P: Painter + ?Sized>(painter: &P, rect: PixelRect, bar: &CfDat
     }
 }
 
-/// Paint one glyph into the `size`×`size` box at `(left, top)`.
+/// The shared unit-box definition for an icon glyph.
 ///
-/// The exhaustive `IconGlyph` dispatch lives here: it selects the shared
-/// unit-box definition from [`shape::cf`] and drives the painter through
-/// [`shape::place`]. The glyph box is square, so the uniform fit fills it and
-/// the current definitions need no rotation. Icon geometry is backend-neutral
-/// vector work: no font, no glyph asset, no browser-only API.
-fn paint_glyph<P: Painter + ?Sized>(
-    painter: &P,
-    glyph: IconGlyph,
-    left: i32,
-    top: i32,
-    size: i32,
-    color: &str,
-) {
-    if size <= 0 {
-        return;
-    }
-    let def = match glyph {
+/// The exhaustive `IconGlyph` dispatch lives here: it selects a definition
+/// from [`shape::cf`]. Icon geometry is backend-neutral vector work: no font,
+/// no glyph asset, no browser-only API.
+fn glyph_def(glyph: IconGlyph) -> &'static GlyphDef {
+    match glyph {
         IconGlyph::ArrowUp => &cf::ARROW_UP,
         IconGlyph::ArrowRight => &cf::ARROW_RIGHT,
         IconGlyph::ArrowDown => &cf::ARROW_DOWN,
@@ -339,7 +334,46 @@ fn paint_glyph<P: Painter + ?Sized>(
         IconGlyph::Heart => &cf::HEART,
         IconGlyph::ThumbsUp => &cf::THUMBS_UP,
         IconGlyph::ThumbsDown => &cf::THUMBS_DOWN,
-    };
+    }
+}
+
+/// Rating glyph definition. Ratings reuse the icon definitions, except the
+/// flat bar: the renderer tiles one copy per rating point, so that glyph uses
+/// the padded `RATING_BAR` and neighbouring points stay separate.
+fn rating_def(glyph: IconGlyph) -> &'static GlyphDef {
+    match glyph {
+        IconGlyph::FlatRectangle => &cf::RATING_BAR,
+        other => glyph_def(other),
+    }
+}
+
+/// Paint one glyph into the `size`×`size` box at `(left, top)`.
+///
+/// The glyph box is square, so the uniform fit fills it. The definition's
+/// rotation turns the placed geometry around the box centre.
+fn paint_glyph<P: Painter + ?Sized>(
+    painter: &P,
+    glyph: IconGlyph,
+    left: i32,
+    top: i32,
+    size: i32,
+    color: &str,
+) {
+    paint_def(painter, glyph_def(glyph), left, top, size, color);
+}
+
+/// Place `def` into the `size`×`size` box at `(left, top)` and paint each part.
+fn paint_def<P: Painter + ?Sized>(
+    painter: &P,
+    def: &GlyphDef,
+    left: i32,
+    top: i32,
+    size: i32,
+    color: &str,
+) {
+    if size <= 0 {
+        return;
+    }
     let size = f64::from(size);
     let Some(place) = Placement::fit(f64::from(left), f64::from(top), size, size, def.rotation)
     else {
