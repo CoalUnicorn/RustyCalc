@@ -66,7 +66,7 @@ pub const MAX_PART_CMDS: usize = 11;
 // the definitions below is this shape, rotated.
 const ARROW_HEAD: [(f64, f64); 3] = [(0.98, 0.5), (0.48, 0.02), (0.48, 0.98)];
 const ARROW_SHAFT: [(f64, f64); 4] = [(0.02, 0.38), (0.58, 0.38), (0.58, 0.62), (0.02, 0.62)];
-const ARROW_PARTS: [GlyphPart; 2] = [GlyphPart::Poly(&ARROW_HEAD), GlyphPart::Poly(&ARROW_SHAFT)];
+static ARROW_PARTS: [GlyphPart; 2] = [GlyphPart::Poly(&ARROW_HEAD), GlyphPart::Poly(&ARROW_SHAFT)];
 
 const TRIANGLE_UP_FILLED_VERTS: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)];
 const TRIANGLE_DOWN_FILLED_VERTS: [(f64, f64); 3] = [(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)];
@@ -115,29 +115,22 @@ const THUMBS_DOWN_FINGER: [(f64, f64); 4] =
 /// a consumer that needs a different star supplies another ratio.
 pub const STAR_INNER: f64 = 0.382;
 
-// One definition per `IconGlyph` variant. The renderer's exhaustive match
-// selects among these; keep the variants in the same order as `IconGlyph`.
-const QUARTER: f64 = std::f64::consts::FRAC_PI_2;
+// The renderer selects the unit-box geometry and applies its rotation through
+// `Placement`; keep the variants in the same order as `IconGlyph`.
+/// Build the shared +x arrow with a clockwise rotation in Y-down space.
+///
+/// Placement applies the angle to the shared parts. This avoids one static
+/// shape definition for each arrow direction.
+pub const fn arrow(rotation: f64) -> GlyphDef {
+    GlyphDef {
+        parts: &ARROW_PARTS,
+        rotation,
+    }
+}
 
-pub const ARROW_UP: GlyphDef = GlyphDef {
-    parts: &ARROW_PARTS,
-    rotation: -QUARTER,
-};
-pub const ARROW_RIGHT: GlyphDef = GlyphDef {
+pub const ARROW: GlyphDef = GlyphDef {
     parts: &ARROW_PARTS,
     rotation: 0.0,
-};
-pub const ARROW_DOWN: GlyphDef = GlyphDef {
-    parts: &ARROW_PARTS,
-    rotation: QUARTER,
-};
-pub const ARROW_ANGLE_UP: GlyphDef = GlyphDef {
-    parts: &ARROW_PARTS,
-    rotation: -std::f64::consts::FRAC_PI_4,
-};
-pub const ARROW_ANGLE_DOWN: GlyphDef = GlyphDef {
-    parts: &ARROW_PARTS,
-    rotation: std::f64::consts::FRAC_PI_4,
 };
 pub const CIRCLE: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Circle { radius: 0.5 }],
@@ -263,29 +256,32 @@ pub const THUMBS_DOWN: GlyphDef = GlyphDef {
     rotation: 0.0,
 };
 
-/// Every built-in definition, for capacity and coverage tests.
-pub const ALL: &[&GlyphDef] = &[
-    &ARROW_UP,
-    &ARROW_RIGHT,
-    &ARROW_DOWN,
-    &ARROW_ANGLE_UP,
-    &ARROW_ANGLE_DOWN,
-    &CIRCLE,
-    &TRIANGLE_UP,
-    &TRIANGLE_DOWN,
-    &TRIANGLE_UP_FILLED,
-    &TRIANGLE_DOWN_FILLED,
-    &FLAT_RECTANGLE,
-    &RHOMBUS,
-    &FLAG,
-    &CHECK,
-    &CROSS,
-    &EXCLAMATION,
-    &STAR,
-    &HEART,
-    &THUMBS_UP,
-    &THUMBS_DOWN,
-];
+/// Every built-in glyph variant, for capacity and coverage tests.
+#[cfg(test)]
+fn all_glyphs() -> [GlyphDef; 20] {
+    [
+        arrow(-std::f64::consts::FRAC_PI_2),
+        arrow(0.0),
+        arrow(std::f64::consts::FRAC_PI_2),
+        arrow(-std::f64::consts::FRAC_PI_4),
+        arrow(std::f64::consts::FRAC_PI_4),
+        CIRCLE,
+        TRIANGLE_UP,
+        TRIANGLE_DOWN,
+        TRIANGLE_UP_FILLED,
+        TRIANGLE_DOWN_FILLED,
+        FLAT_RECTANGLE,
+        RHOMBUS,
+        FLAG,
+        CHECK,
+        CROSS,
+        EXCLAMATION,
+        STAR,
+        HEART,
+        THUMBS_UP,
+        THUMBS_DOWN,
+    ]
+}
 
 #[cfg(test)]
 mod tests {
@@ -296,7 +292,8 @@ mod tests {
 
     #[test]
     fn every_glyph_fits_the_placement_buffer() {
-        for def in ALL.iter().copied().chain([&RATING_BAR]) {
+        let all = all_glyphs();
+        for def in all.iter().chain(std::iter::once(&RATING_BAR)) {
             for part in def.parts {
                 assert!(
                     part.cmd_count() <= MAX_PART_CMDS,
@@ -309,9 +306,11 @@ mod tests {
 
     #[test]
     fn the_largest_definition_matches_the_published_capacity() {
-        let largest = ALL
+        let all = all_glyphs();
+        let largest = all
             .iter()
             .flat_map(|def| def.parts.iter())
+            .chain(RATING_BAR.parts.iter())
             .map(GlyphPart::cmd_count)
             .max()
             .expect("at least one glyph");
@@ -323,7 +322,7 @@ mod tests {
 
     #[test]
     fn every_glyph_has_at_least_one_part() {
-        for def in ALL {
+        for def in &all_glyphs() {
             assert!(!def.parts.is_empty());
         }
     }
@@ -332,7 +331,7 @@ mod tests {
     fn one_definition_per_icon_variant() {
         // `IconGlyph` has 20 variants; the renderer's exhaustive match maps
         // each to one definition here.
-        assert_eq!(ALL.len(), 20);
+        assert_eq!(all_glyphs().len(), 20);
     }
 
     // D4 rotation-equivalence check: the five arrow variants must be one
@@ -343,21 +342,21 @@ mod tests {
     #[test]
     fn the_five_arrow_variants_share_one_definition() {
         let arrows = [
-            &ARROW_UP,
-            &ARROW_RIGHT,
-            &ARROW_DOWN,
-            &ARROW_ANGLE_UP,
-            &ARROW_ANGLE_DOWN,
+            arrow(-FRAC_PI_2),
+            arrow(0.0),
+            arrow(FRAC_PI_2),
+            arrow(-FRAC_PI_4),
+            arrow(FRAC_PI_4),
         ];
-        for def in arrows {
+        for def in &arrows {
             assert!(std::ptr::eq(def.parts.as_ptr(), ARROW_PARTS.as_ptr()));
             assert_eq!(def.parts.len(), ARROW_PARTS.len());
         }
-        assert_eq!(ARROW_RIGHT.rotation, 0.0);
-        assert_eq!(ARROW_DOWN.rotation, FRAC_PI_2);
-        assert_eq!(ARROW_UP.rotation, -FRAC_PI_2);
-        assert_eq!(ARROW_ANGLE_DOWN.rotation, FRAC_PI_4);
-        assert_eq!(ARROW_ANGLE_UP.rotation, -FRAC_PI_4);
+        assert_eq!(arrows[0].rotation, -FRAC_PI_2);
+        assert_eq!(arrows[1].rotation, 0.0);
+        assert_eq!(arrows[2].rotation, FRAC_PI_2);
+        assert_eq!(arrows[3].rotation, -FRAC_PI_4);
+        assert_eq!(arrows[4].rotation, FRAC_PI_4);
     }
 
     #[test]
@@ -367,15 +366,15 @@ mod tests {
         let place = |def: &GlyphDef| Placement::fit(0.0, 0.0, 1.0, 1.0, def.rotation).unwrap();
         let p = |def: &GlyphDef| place(def).point(tip);
 
-        let right = p(&ARROW_RIGHT);
+        let right = p(&arrow(0.0));
         assert!(right.x > 0.9 && (right.y - 0.5).abs() < 1e-9);
-        let down = p(&ARROW_DOWN);
+        let down = p(&arrow(FRAC_PI_2));
         assert!((down.x - 0.5).abs() < 1e-9 && down.y > 0.9);
-        let up = p(&ARROW_UP);
+        let up = p(&arrow(-FRAC_PI_2));
         assert!((up.x - 0.5).abs() < 1e-9 && up.y < 0.1);
-        let angle_down = p(&ARROW_ANGLE_DOWN);
+        let angle_down = p(&arrow(FRAC_PI_4));
         assert!(angle_down.x > 0.7 && angle_down.y > 0.7);
-        let angle_up = p(&ARROW_ANGLE_UP);
+        let angle_up = p(&arrow(-FRAC_PI_4));
         assert!(angle_up.x > 0.7 && angle_up.y < 0.3);
     }
 }

@@ -13,6 +13,7 @@
 //! `rect_fill_hgradient`, `fill_path`), so no backend carries a CF-specific
 //! method.
 
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 use std::rc::Rc;
 
 use crate::geometry::path::{Path, PathCmd, PointF};
@@ -182,19 +183,13 @@ impl CfDecorationPaint {
             left += size;
         }
         if let Some(rating) = &self.rating {
+            let def = rating_def(rating.glyph);
             for i in 0..i32::from(rating.count) {
                 let glyph_left = left + i * size;
                 if glyph_left >= inner.right() {
                     break;
                 }
-                paint_def(
-                    painter,
-                    rating_def(rating.glyph),
-                    glyph_left,
-                    top,
-                    size,
-                    &rating.color,
-                );
+                paint_def(painter, &def, glyph_left, top, size, &rating.color);
             }
         }
         if needs_clip {
@@ -312,37 +307,37 @@ fn paint_data_bar<P: Painter + ?Sized>(painter: &P, rect: PixelRect, bar: &CfDat
 /// The exhaustive `IconGlyph` dispatch lives here: it selects a definition
 /// from [`shape::cf`]. Icon geometry is backend-neutral vector work: no font,
 /// no glyph asset, no browser-only API.
-fn glyph_def(glyph: IconGlyph) -> &'static GlyphDef {
+fn glyph_def(glyph: IconGlyph) -> GlyphDef {
     match glyph {
-        IconGlyph::ArrowUp => &cf::ARROW_UP,
-        IconGlyph::ArrowRight => &cf::ARROW_RIGHT,
-        IconGlyph::ArrowDown => &cf::ARROW_DOWN,
-        IconGlyph::ArrowAngleUp => &cf::ARROW_ANGLE_UP,
-        IconGlyph::ArrowAngleDown => &cf::ARROW_ANGLE_DOWN,
-        IconGlyph::Circle => &cf::CIRCLE,
-        IconGlyph::TriangleUp => &cf::TRIANGLE_UP,
-        IconGlyph::TriangleDown => &cf::TRIANGLE_DOWN,
-        IconGlyph::TriangleUpFilled => &cf::TRIANGLE_UP_FILLED,
-        IconGlyph::TriangleDownFilled => &cf::TRIANGLE_DOWN_FILLED,
-        IconGlyph::FlatRectangle => &cf::FLAT_RECTANGLE,
-        IconGlyph::Rhombus => &cf::RHOMBUS,
-        IconGlyph::Flag => &cf::FLAG,
-        IconGlyph::Check => &cf::CHECK,
-        IconGlyph::Cross => &cf::CROSS,
-        IconGlyph::Exclamation => &cf::EXCLAMATION,
-        IconGlyph::Star => &cf::STAR,
-        IconGlyph::Heart => &cf::HEART,
-        IconGlyph::ThumbsUp => &cf::THUMBS_UP,
-        IconGlyph::ThumbsDown => &cf::THUMBS_DOWN,
+        IconGlyph::ArrowUp => cf::arrow(-FRAC_PI_2),
+        IconGlyph::ArrowRight => cf::arrow(0.0),
+        IconGlyph::ArrowDown => cf::arrow(FRAC_PI_2),
+        IconGlyph::ArrowAngleUp => cf::arrow(-FRAC_PI_4),
+        IconGlyph::ArrowAngleDown => cf::arrow(FRAC_PI_4),
+        IconGlyph::Circle => cf::CIRCLE,
+        IconGlyph::TriangleUp => cf::TRIANGLE_UP,
+        IconGlyph::TriangleDown => cf::TRIANGLE_DOWN,
+        IconGlyph::TriangleUpFilled => cf::TRIANGLE_UP_FILLED,
+        IconGlyph::TriangleDownFilled => cf::TRIANGLE_DOWN_FILLED,
+        IconGlyph::FlatRectangle => cf::FLAT_RECTANGLE,
+        IconGlyph::Rhombus => cf::RHOMBUS,
+        IconGlyph::Flag => cf::FLAG,
+        IconGlyph::Check => cf::CHECK,
+        IconGlyph::Cross => cf::CROSS,
+        IconGlyph::Exclamation => cf::EXCLAMATION,
+        IconGlyph::Star => cf::STAR,
+        IconGlyph::Heart => cf::HEART,
+        IconGlyph::ThumbsUp => cf::THUMBS_UP,
+        IconGlyph::ThumbsDown => cf::THUMBS_DOWN,
     }
 }
 
 /// Rating glyph definition. Ratings reuse the icon definitions, except the
 /// flat bar: the renderer tiles one copy per rating point, so that glyph uses
 /// the padded `RATING_BAR` and neighbouring points stay separate.
-fn rating_def(glyph: IconGlyph) -> &'static GlyphDef {
+fn rating_def(glyph: IconGlyph) -> GlyphDef {
     match glyph {
-        IconGlyph::FlatRectangle => &cf::RATING_BAR,
+        IconGlyph::FlatRectangle => cf::RATING_BAR,
         other => glyph_def(other),
     }
 }
@@ -359,7 +354,8 @@ fn paint_glyph<P: Painter + ?Sized>(
     size: i32,
     color: &str,
 ) {
-    paint_def(painter, glyph_def(glyph), left, top, size, color);
+    let def = glyph_def(glyph);
+    paint_def(painter, &def, left, top, size, color);
 }
 
 /// Place `def` into the `size`×`size` box at `(left, top)` and paint each part.
@@ -557,6 +553,22 @@ mod tests {
                 assert_eq!(&*p.color, "#84cb1f");
             }
             other => panic!("expected an icon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrow_variants_use_the_rotation_factory() {
+        let arrows = [
+            (IconGlyph::ArrowRight, 0.0),
+            (IconGlyph::ArrowAngleDown, FRAC_PI_4),
+            (IconGlyph::ArrowDown, FRAC_PI_2),
+            (IconGlyph::ArrowAngleUp, -FRAC_PI_4),
+            (IconGlyph::ArrowUp, -FRAC_PI_2),
+        ];
+        for (glyph, angle) in arrows {
+            let def = glyph_def(glyph);
+            assert_eq!(def.rotation, angle);
+            assert_eq!(def.parts.as_ptr(), cf::ARROW.parts.as_ptr());
         }
     }
 
