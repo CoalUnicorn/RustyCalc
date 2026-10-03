@@ -13,7 +13,7 @@
 //! `rect_fill_hgradient`, `fill_path`), so no backend carries a CF-specific
 //! method.
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::rc::Rc;
 
 use crate::geometry::path::{Path, PathCmd, PointF};
@@ -315,10 +315,10 @@ fn glyph_def(glyph: IconGlyph) -> GlyphDef {
         IconGlyph::ArrowAngleUp => cf::arrow(-FRAC_PI_4),
         IconGlyph::ArrowAngleDown => cf::arrow(FRAC_PI_4),
         IconGlyph::Circle => cf::CIRCLE,
-        IconGlyph::TriangleUp => cf::TRIANGLE_UP,
-        IconGlyph::TriangleDown => cf::TRIANGLE_DOWN,
-        IconGlyph::TriangleUpFilled => cf::TRIANGLE_UP_FILLED,
-        IconGlyph::TriangleDownFilled => cf::TRIANGLE_DOWN_FILLED,
+        IconGlyph::TriangleUp => cf::triangle(cf::TriangleStyle::Chevron, 0.0),
+        IconGlyph::TriangleDown => cf::triangle(cf::TriangleStyle::Chevron, PI),
+        IconGlyph::TriangleUpFilled => cf::triangle(cf::TriangleStyle::Filled, 0.0),
+        IconGlyph::TriangleDownFilled => cf::triangle(cf::TriangleStyle::Filled, PI),
         IconGlyph::FlatRectangle => cf::FLAT_RECTANGLE,
         IconGlyph::Rhombus => cf::RHOMBUS,
         IconGlyph::Flag => cf::FLAG,
@@ -569,6 +569,22 @@ mod tests {
             let def = glyph_def(glyph);
             assert_eq!(def.rotation, angle);
             assert_eq!(def.parts.as_ptr(), cf::ARROW.parts.as_ptr());
+        }
+    }
+
+    #[test]
+    fn triangle_glyphs_select_orientation_and_fill_from_shared_definitions() {
+        let triangles = [
+            (IconGlyph::TriangleUp, cf::TriangleStyle::Chevron, 0.0),
+            (IconGlyph::TriangleDown, cf::TriangleStyle::Chevron, PI),
+            (IconGlyph::TriangleUpFilled, cf::TriangleStyle::Filled, 0.0),
+            (IconGlyph::TriangleDownFilled, cf::TriangleStyle::Filled, PI),
+        ];
+        for (glyph, style, rotation) in triangles {
+            let def = glyph_def(glyph);
+            let expected = cf::triangle(style, rotation);
+            assert_eq!(def.rotation, rotation);
+            assert_eq!(def.parts.as_ptr(), expected.parts.as_ptr());
         }
     }
 

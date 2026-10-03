@@ -36,6 +36,15 @@ pub enum GlyphPart {
     Star { inner: f64 },
 }
 
+/// Geometry used for the triangle-style CF icons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriangleStyle {
+    /// Open chevron made from two strokes.
+    Chevron,
+    /// Solid triangle.
+    Filled,
+}
+
 impl GlyphPart {
     /// Command slots this part needs in the placement buffer. A circle needs
     /// none: it draws through the native `fill_circle` primitive.
@@ -69,7 +78,19 @@ const ARROW_SHAFT: [(f64, f64); 4] = [(0.02, 0.38), (0.58, 0.38), (0.58, 0.62), 
 static ARROW_PARTS: [GlyphPart; 2] = [GlyphPart::Poly(&ARROW_HEAD), GlyphPart::Poly(&ARROW_SHAFT)];
 
 const TRIANGLE_UP_FILLED_VERTS: [(f64, f64); 3] = [(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)];
-const TRIANGLE_DOWN_FILLED_VERTS: [(f64, f64); 3] = [(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)];
+static TRIANGLE_CHEVRON_PARTS: [GlyphPart; 2] = [
+    GlyphPart::Segment {
+        from: (0.20, 0.65),
+        to: (0.50, 0.35),
+        half: 0.05,
+    },
+    GlyphPart::Segment {
+        from: (0.50, 0.35),
+        to: (0.80, 0.65),
+        half: 0.05,
+    },
+];
+static TRIANGLE_FILLED_PARTS: [GlyphPart; 1] = [GlyphPart::Poly(&TRIANGLE_UP_FILLED_VERTS)];
 // The flat bar used by the `3Triangles` middle icon and, padded, by the
 // rating sets (`Ratings4`, `Ratings5`, `Bozes5`, …). The icon-set bar spans
 // the box; the rating bar leaves a gap because the renderer tiles one copy
@@ -128,50 +149,24 @@ pub const fn arrow(rotation: f64) -> GlyphDef {
     }
 }
 
+/// Build an up- or down-facing triangle icon from shared geometry.
+///
+/// `rotation` is clockwise in Y-down space. Use a half turn for down-facing
+/// variants.
+pub const fn triangle(style: TriangleStyle, rotation: f64) -> GlyphDef {
+    let parts: &'static [GlyphPart] = match style {
+        TriangleStyle::Chevron => &TRIANGLE_CHEVRON_PARTS,
+        TriangleStyle::Filled => &TRIANGLE_FILLED_PARTS,
+    };
+    GlyphDef { parts, rotation }
+}
+
 pub const ARROW: GlyphDef = GlyphDef {
     parts: &ARROW_PARTS,
     rotation: 0.0,
 };
 pub const CIRCLE: GlyphDef = GlyphDef {
     parts: &[GlyphPart::Circle { radius: 0.5 }],
-    rotation: 0.0,
-};
-pub const TRIANGLE_UP: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Segment {
-            from: (0.20, 0.65),
-            to: (0.50, 0.35),
-            half: 0.05,
-        },
-        GlyphPart::Segment {
-            from: (0.50, 0.35),
-            to: (0.80, 0.65),
-            half: 0.05,
-        },
-    ],
-    rotation: 0.0,
-};
-pub const TRIANGLE_DOWN: GlyphDef = GlyphDef {
-    parts: &[
-        GlyphPart::Segment {
-            from: (0.20, 0.35),
-            to: (0.50, 0.65),
-            half: 0.05,
-        },
-        GlyphPart::Segment {
-            from: (0.50, 0.65),
-            to: (0.80, 0.35),
-            half: 0.05,
-        },
-    ],
-    rotation: 0.0,
-};
-pub const TRIANGLE_UP_FILLED: GlyphDef = GlyphDef {
-    parts: &[GlyphPart::Poly(&TRIANGLE_UP_FILLED_VERTS)],
-    rotation: 0.0,
-};
-pub const TRIANGLE_DOWN_FILLED: GlyphDef = GlyphDef {
-    parts: &[GlyphPart::Poly(&TRIANGLE_DOWN_FILLED_VERTS)],
     rotation: 0.0,
 };
 pub const FLAT_RECTANGLE: GlyphDef = GlyphDef {
@@ -266,10 +261,10 @@ fn all_glyphs() -> [GlyphDef; 20] {
         arrow(-std::f64::consts::FRAC_PI_4),
         arrow(std::f64::consts::FRAC_PI_4),
         CIRCLE,
-        TRIANGLE_UP,
-        TRIANGLE_DOWN,
-        TRIANGLE_UP_FILLED,
-        TRIANGLE_DOWN_FILLED,
+        triangle(TriangleStyle::Chevron, 0.0),
+        triangle(TriangleStyle::Chevron, std::f64::consts::PI),
+        triangle(TriangleStyle::Filled, 0.0),
+        triangle(TriangleStyle::Filled, std::f64::consts::PI),
         FLAT_RECTANGLE,
         RHOMBUS,
         FLAG,
@@ -357,6 +352,21 @@ mod tests {
         assert_eq!(arrows[2].rotation, FRAC_PI_2);
         assert_eq!(arrows[3].rotation, -FRAC_PI_4);
         assert_eq!(arrows[4].rotation, FRAC_PI_4);
+    }
+
+    #[test]
+    fn triangle_variants_share_geometry_and_rotate_for_down() {
+        let chevron_up = triangle(TriangleStyle::Chevron, 0.0);
+        let chevron_down = triangle(TriangleStyle::Chevron, std::f64::consts::PI);
+        let filled_up = triangle(TriangleStyle::Filled, 0.0);
+        let filled_down = triangle(TriangleStyle::Filled, std::f64::consts::PI);
+
+        assert_eq!(chevron_up.parts.as_ptr(), chevron_down.parts.as_ptr());
+        assert_eq!(chevron_up.parts.len(), 2);
+        assert_eq!(filled_up.parts.as_ptr(), filled_down.parts.as_ptr());
+        assert_eq!(filled_up.parts.len(), 1);
+        assert_eq!(chevron_down.rotation, std::f64::consts::PI);
+        assert_eq!(filled_down.rotation, std::f64::consts::PI);
     }
 
     #[test]
