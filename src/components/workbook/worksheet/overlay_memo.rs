@@ -1,88 +1,88 @@
-//! Reactive overlay Memo — derives the renderer-facing overlay payload
-//! from drag state, editing state, and the dragged-ref override.
+//! Reactive overlay Memo — derives the renderer-facing `OverlayState` from
+//! the model's selected view, drag state and editing state.
 //!
 //! Lives in a memo, not a direct Effect subscription: if the subscribe
-//! Effect read drag/point_range directly, `set_drag(Selecting)` in
+//! Effect read drag/editing state directly, `set_drag(Selecting)` in
 //! `on_mousedown` would cause an extra Effect run (and an extra render)
 //! before the navigation event fires. The memo's `PartialEq` gate also
-//! suppresses spurious renders: `Selecting` and `Idle` both map to
-//! `extend_to=None`, so switching between them doesn't change the memo
-//! output and doesn't re-render.
+//! suppresses spurious renders: `Selecting` and `Idle` both map to the same
+//! selection, so switching between them doesn't change the memo output.
 //!
 //! The clipboard is NOT in this memo because it lives in a `StoredValue`
-//! (non-reactive). It is read fresh in the rAF callback each render so it
+//! (non-reactive). The rAF loop patches it into the request each frame so it
 //! never goes stale (the original marching-ants bug).
 
-use iron_canvas_core::address::AutofillTarget;
+use iron_canvas::{FormulaOverlay, OverlayState};
+use iron_canvas_core::CellCoord;
 use leptos::prelude::*;
 
-use crate::coord::{ActiveRef, CellArea};
-use crate::input::mouse::resolved_fill_target;
+use crate::coord::CellArea;
+use crate::input::mouse::{preview_fill_extension, resolved_fill_target};
 use crate::state::{DragState, ModelStore, WorkbookState};
 
-/// Named so the subscribe-Effect's `prev: Option<OverlayTuple>` reads
-/// cleanly and the `PartialEq` gate is explicit instead of relying on
-/// Rust's tuple-equality blanket impl.
-#[derive(Clone, PartialEq)]
-pub(super) struct OverlayTuple {
-    pub extend_to: Option<AutofillTarget>,
-    pub point_range: Option<CellArea>,
-    pub formula_refs: Vec<ActiveRef>,
-}
-
-pub(super) fn reactive_overlay(state: WorkbookState, model: ModelStore) -> Memo<OverlayTuple> {
+pub(super) fn reactive_overlay(state: WorkbookState, model: ModelStore) -> Memo<OverlayState> {
     Memo::new(move |_| {
-        let extend_to = if let DragState::Extending { to_row, to_col } = state.drag.get() {
-            // The ghost shows the extent the engine will accept, through the
-            // same helper the commit uses: a target inside a merge would promise
-            // a fill that cuts it, which the engine rejects.
-            Some(resolved_fill_target(model, to_row, to_col))
-        } else {
-            None
-        };
+        // Subscribe to the navigation bus so a selection/sheet move re-derives
+        // the selection overlay; the model store itself is not reactive.
+        let _ = state.events.navigation.get();
 
-        // Reading editing_cell here subscribes the memo to it. Since FormulaRef
-        // derives PartialEq, the memo's PartialEq gate suppresses re-renders
-        // when refs don't change (e.g. text changed but no new refs produced).
+        let mut overlays = OverlayState::default();
+        let view = model.with_value(|m| m.get_selected_view());
+        let source = CellArea::from(view.range).normalized();
+        overlays.selection.push(source.into());
+        if let DragState::Extending { to_row, to_col } = state.drag.get() {
+            let target = resolved_fill_target(model, to_row, to_col);
+            if let Some(extension) = preview_fill_extension(source, target) {
+                overlays.selection.push(extension.into());
+            }
+        }
+        overlays.active_cell = Some(CellCoord {
+            row: view.row,
+            col: view.column,
+        });
+
+        // Reading editing_cell here subscribes the memo to it. Since the
+        // formula analysis derives PartialEq, the memo's PartialEq gate
+        // suppresses re-renders when refs don't change (e.g. text changed but
+        // no new refs produced).
         let editing_cell = state.editing_cell.get();
-        let mut formula_refs: Vec<ActiveRef> = editing_cell
-            .as_ref()
-            .map(|e| e.formula_analysis.refs().to_vec())
-            .unwrap_or_default();
-
-        // Live drag ghost: while `DraggingFormulaRef` is active, mousemove
-        // publishes a `RefOverride`; we patch the matching ref's `sheet_area`
-        // so the painted outline follows the cursor without touching the
-        // formula text. Bounds-checked: if the formula was re-analyzed
-        // mid-drag and refs shrank, the patch is silently skipped.
-        if let Some(o) = state.dragged_ref_override.get()
-            && let Some(r) = formula_refs.get_mut(o.idx)
-        {
-            r.sheet_area = o.range;
+        if let Some(edit) = editing_cell.as_ref() {
+            let dragged_ref = match state.drag.get() {
+                DragState::DraggingFormulaRef {
+                    ref_idx, preview, ..
+                } => Some((ref_idx, preview)),
+                _ => None,
+            };
+            for (ref_idx, reference) in edit.formula_analysis.refs().iter().enumerate() {
+                let area = dragged_ref
+                    .filter(|(dragged_idx, _)| *dragged_idx == ref_idx)
+                    .map_or(reference.sheet_area, |(_, preview)| preview);
+                overlays.formula_references.push(FormulaOverlay {
+                    sheet: area.sheet,
+                    range: area.area.into(),
+                    color_index: reference.color_idx,
+                });
+            }
         }
 
         // Point-mode range for overlay painting. RefNode stores relative
         // deltas, so resolution needs the editing cell's address as anchor.
         // Cross-sheet pointing: the canvas only shows the selected sheet, so
-        // the rectangle is suppressed when the pointed sheet isn't visible
-        // (formula_refs and clipboard carry their sheet and are filtered by
-        // the painter; point_range is a bare RCRange, so the gate lives here).
-        // The visible sheet isn't a reactive value — subscribe to the
-        // navigation bus so ActiveSheetChanged re-evaluates the gate.
-        let point_range = match (state.drag.get(), editing_cell.as_ref()) {
-            (DragState::Pointing { ref_node, .. }, Some(e)) => {
-                let _ = state.events.navigation.get();
-                let range = ref_node.area(&e.address);
-                let visible = model.with_value(|m| m.get_selected_view().sheet);
-                (range.sheet == visible).then_some(range.area)
+        // the rectangle is suppressed when the pointed sheet isn't visible.
+        if let (DragState::Pointing { ref_node, .. }, Some(edit)) =
+            (state.drag.get(), editing_cell.as_ref())
+        {
+            let range = ref_node.area(&edit.address);
+            if range.sheet == view.sheet {
+                let color_index = overlays.formula_references.len();
+                overlays.formula_references.push(FormulaOverlay {
+                    sheet: range.sheet,
+                    range: range.area.into(),
+                    color_index,
+                });
             }
-            _ => None,
-        };
-
-        OverlayTuple {
-            extend_to,
-            point_range,
-            formula_refs,
         }
+
+        overlays
     })
 }

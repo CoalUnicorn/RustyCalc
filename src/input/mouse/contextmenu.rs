@@ -7,7 +7,8 @@ use leptos::prelude::*;
 
 use crate::coord::CellArea;
 use crate::state::{ContextMenuState, HeaderContextMenu, ModelStore, WorkbookState};
-use iron_canvas_core::chrome::hit::HitTest;
+use iron_canvas_core::Point;
+use iron_canvas_core::scene_geometry::GridHit;
 
 use super::header_span::{Axis, full_header_span};
 use super::{CanvasHandle, with_canvas};
@@ -19,11 +20,13 @@ pub fn handle_contextmenu(
     state: WorkbookState,
     icv: CanvasHandle,
 ) {
-    let x = ev.offset_x() as f64;
-    let y = ev.offset_y() as f64;
+    let point = Point {
+        x: ev.offset_x(),
+        y: ev.offset_y(),
+    };
 
-    let target = match with_canvas(icv, |ic| ic.hit_test(x, y)) {
-        Some(HitTest::ColumnHeader(col)) => Some(model.with_value(|m| {
+    let target = match with_canvas(icv, |h| h.hit_test(point)).flatten() {
+        Some(GridHit::ColumnHeader(col)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, col, Axis::Col);
             HeaderContextMenu::Column {
@@ -31,7 +34,7 @@ pub fn handle_contextmenu(
                 count: last - first + 1,
             }
         })),
-        Some(HitTest::RowHeader(row)) => Some(model.with_value(|m| {
+        Some(GridHit::RowHeader(row)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, row, Axis::Row);
             HeaderContextMenu::Row {

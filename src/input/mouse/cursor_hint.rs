@@ -7,12 +7,24 @@
 //! It also reports whether the hit cell carries a committed link, so one
 //! probe feeds both the cursor class and the hover tooltip.
 
-use iron_canvas_core::chrome::hit::{HitTest, RefZone, ResizeTarget};
-use iron_canvas_core::geometry::prim::{RectCorner, Side};
+use iron_canvas::{RefCorner, RefZone};
+use iron_canvas_core::scene_geometry::{GridHit, GridRange, GridResize};
+use iron_canvas_core::{Point, Side};
+use leptos::prelude::WithValue;
 
-use crate::state::{CursorHint, WorkbookState};
+use crate::coord::CellArea;
+use crate::scene::SceneHandle;
+use crate::state::{CursorHint, ModelStore, WorkbookState};
 
+use super::formula_ref::draggable_ref_indices;
 use super::{CanvasHandle, with_canvas};
+
+/// Pixel tolerance for column/row resize hit-test in the header area.
+pub(super) const HIT_ZONE: i32 = 4;
+
+/// Slack around the autofill handle square so the crosshair preview and the
+/// grab both trigger on the same pixels.
+const AUTOFILL_PAD: i32 = 3;
 
 /// One idle-hover probe: the cursor style a mousedown here would start, plus
 /// the link cell under the pointer (if any) for the hover tooltip.
@@ -32,50 +44,80 @@ impl HoverHint {
     }
 }
 
-pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> HoverHint {
-    if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
+/// Whether `point` falls on the selection's bottom-right autofill handle.
+///
+/// The scene geometry does not classify the handle (it is not part of the
+/// grid hit surface), so the host derives it from the committed handle square
+/// plus a small grab pad.
+pub(super) fn autofill_hit(handle: &SceneHandle, model: ModelStore, point: Point) -> bool {
+    let range: GridRange = model.with_value(|m| CellArea::from(m.get_selected_view().range).into());
+    let Some(rect) = handle.autofill_handle_rect(range) else {
+        return false;
+    };
+    point.x >= rect.left() - AUTOFILL_PAD
+        && point.x < rect.right() + AUTOFILL_PAD
+        && point.y >= rect.top() - AUTOFILL_PAD
+        && point.y < rect.bottom() + AUTOFILL_PAD
+}
+
+pub(super) fn compute_cursor_hint(
+    icv: CanvasHandle,
+    model: ModelStore,
+    x: f64,
+    y: f64,
+    draggable_refs: &[usize],
+) -> HoverHint {
+    let point = Point {
+        x: x as i32,
+        y: y as i32,
+    };
+    if let Some(target) = with_canvas(icv, |h| h.resize_target(point, HIT_ZONE)).flatten() {
         return HoverHint::plain(match target {
-            ResizeTarget::ColumnEdge(_) => CursorHint::ColResize,
-            ResizeTarget::RowEdge(_) => CursorHint::RowResize,
+            GridResize::Column(_) => CursorHint::ColResize,
+            GridResize::Row(_) => CursorHint::RowResize,
         });
     }
-    match with_canvas(icv, |ic| ic.hit_test(x, y)).unwrap_or(HitTest::Outside) {
-        HitTest::AutofillHandle { .. } => HoverHint::plain(CursorHint::Autofill),
-        HitTest::FormulaRef { zone, .. } => HoverHint::plain(ref_zone_hint(zone)),
-        HitTest::Cell { row, column } => {
+    if let Some(hit) = with_canvas(icv, |h| h.formula_ref_hit_test(point, draggable_refs)).flatten()
+    {
+        return HoverHint::plain(ref_zone_hint(hit.zone));
+    }
+    match with_canvas(icv, |h| h.hit_test(point)).flatten() {
+        Some(GridHit::Cell(coord)) => {
+            if with_canvas(icv, |h| autofill_hit(h, model, point)).unwrap_or(false) {
+                return HoverHint::plain(CursorHint::Autofill);
+            }
             // Resolve the *logical* cell: a merged range is one cell whose
             // anchor owns the link, so probing the physical address would miss
             // a link the user can plainly see under the pointer. The reported
             // cell stays the physical one — the tooltip is positioned against
             // what the pointer is over, and drag/resize keep physical coords.
-            let linked = with_canvas(icv, |ic| ic.display_cell_at(x, y))
-                .flatten()
-                .is_some_and(|cell| cell.link.is_some());
+            let linked = with_canvas(icv, |h| {
+                h.display_cell_at(point)
+                    .is_some_and(|cell| cell.link.is_some())
+            })
+            .unwrap_or(false);
             HoverHint {
                 cursor: if linked {
                     CursorHint::Pointer
                 } else {
                     CursorHint::Cell
                 },
-                link_cell: linked.then_some((row, column)),
+                link_cell: linked.then_some((coord.row, coord.col)),
             }
         }
-        HitTest::ColumnHeader(_) | HitTest::RowHeader(_) | HitTest::Corner | HitTest::Outside => {
+        Some(GridHit::ColumnHeader(_) | GridHit::RowHeader(_) | GridHit::Corner) | None => {
             HoverHint::plain(CursorHint::Cell)
         }
     }
 }
 
-/// `Body` -> whole-range move; opposite-side `Edge`s share an axis
-/// (top/bottom = NS, left/right = EW); diagonal `Corner` pairs share
-/// a slope (TL<->BR = NWSE, TR<->BL = NESW).
 fn ref_zone_hint(zone: RefZone) -> CursorHint {
     match zone {
         RefZone::Body => CursorHint::RefMove,
         RefZone::Edge(Side::Top | Side::Bottom) => CursorHint::RefExtendNS,
         RefZone::Edge(Side::Left | Side::Right) => CursorHint::RefExtendEW,
-        RefZone::Corner(RectCorner::TopLeft | RectCorner::BottomRight) => CursorHint::RefCornerNwse,
-        RefZone::Corner(RectCorner::TopRight | RectCorner::BottomLeft) => CursorHint::RefCornerNesw,
+        RefZone::Corner(RefCorner::TopLeft | RefCorner::BottomRight) => CursorHint::RefCornerNwse,
+        RefZone::Corner(RefCorner::TopRight | RefCorner::BottomLeft) => CursorHint::RefCornerNesw,
     }
 }
 
@@ -87,9 +129,20 @@ fn ref_zone_hint(zone: RefZone) -> CursorHint {
 ///
 /// The pointer position is stored before the probe, so a revalidation after a
 /// commit re-probes the same position even when the pointer has not moved.
-pub(crate) fn set_hover_probe(state: WorkbookState, icv: CanvasHandle, x: f64, y: f64) {
+pub(crate) fn set_hover_probe(
+    state: WorkbookState,
+    model: ModelStore,
+    icv: CanvasHandle,
+    x: f64,
+    y: f64,
+) {
     state.hover_pointer.set(Some((x, y)));
-    let probe = compute_cursor_hint(icv, x, y);
+    let draggable_refs = state
+        .editing_cell
+        .get_untracked()
+        .map(|edit| draggable_ref_indices(edit.formula_analysis.refs()))
+        .unwrap_or_default();
+    let probe = compute_cursor_hint(icv, model, x, y, &draggable_refs);
     if state.hover_cursor.get_untracked() != probe.cursor {
         state.hover_cursor.set(probe.cursor);
     }
@@ -114,12 +167,9 @@ pub(crate) fn clear_hover(state: WorkbookState) {
 /// Both the cursor class and the hovered link cell are derived from committed
 /// state, so both are re-derived here rather than from the input event that
 /// scheduled the paint.
-pub(crate) fn revalidate_hover(state: WorkbookState, icv: CanvasHandle) {
+pub(crate) fn revalidate_hover(state: WorkbookState, model: ModelStore, icv: CanvasHandle) {
     match state.hover_pointer.get_untracked() {
-        Some((x, y)) => set_hover_probe(state, icv, x, y),
+        Some((x, y)) => set_hover_probe(state, model, icv, x, y),
         None => clear_hover(state),
     }
 }
-
-/// Pixel tolerance for column/row resize hit-test in the header area.
-pub(super) const HIT_ZONE: f64 = 4.0;

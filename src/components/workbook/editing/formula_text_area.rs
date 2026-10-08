@@ -23,9 +23,9 @@ use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults,
 use crate::input::mouse::CanvasHandle;
 use crate::model::SheetRoster;
 use crate::model::frontend_model::DefinedNameManager;
+use crate::scene::SceneHandle;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
-use iron_canvas_core::{CellCoord, PixelRect, RCRange};
-use iron_canvas_web::IronCanvas;
+use iron_canvas_core::{CellCoord, PixelRect, scene_geometry::GridRange};
 
 /// Pixel rectangle the in-cell editor must cover for the cell at
 /// `(row, column)`.
@@ -43,30 +43,31 @@ use iron_canvas_web::IronCanvas;
 ///    visible fragment is the part still on screen, which is where the editor
 ///    belongs.
 fn editor_rect(
-    ic: &IronCanvas,
+    handle: &SceneHandle,
     model: &ModelStore,
     sheet: u32,
     row: i32,
     column: i32,
 ) -> Option<PixelRect> {
-    if let Some(own) = ic.cell_rect(row, column) {
+    if let Some(own) = handle.cell_rect(row, column) {
         let centre = own.center();
-        if let Some(cell) = ic.display_cell_at(f64::from(centre.x), f64::from(centre.y))
-            && cell.cell == (CellCoord { row, col: column })
+        if let Some(cell) = handle.display_cell_at(centre)
+            && cell.physical == (CellCoord { row, col: column })
         {
-            return Some(cell.fragment);
+            return Some(cell.fragment.rect);
         }
     }
-    ic.visible_fragments(logical_range(model, sheet, row, column))
+    handle
+        .visible_fragments(logical_range(model, sheet, row, column))
         .into_iter()
-        .map(|(_, rect)| rect)
+        .map(|fragment| fragment.rect)
         .next()
 }
 
 /// The merged range containing `(row, column)`, or the single cell when the
 /// cell is not merged. Read from the engine's own merge list, so an editor whose
 /// anchor is scrolled out of view still resolves.
-fn logical_range(model: &ModelStore, sheet: u32, row: i32, column: i32) -> RCRange {
+fn logical_range(model: &ModelStore, sheet: u32, row: i32, column: i32) -> GridRange {
     model.with_value(|m| {
         m.get_merged_cells(sheet)
             .ok()
@@ -78,13 +79,20 @@ fn logical_range(model: &ModelStore, sheet: u32, row: i32, column: i32) -> RCRan
                         && column < mc.column + mc.width
                 })
             })
-            .map(|mc| RCRange {
-                r1: mc.row,
-                c1: mc.column,
-                r2: mc.row + mc.height - 1,
-                c2: mc.column + mc.width - 1,
+            .map(|mc| GridRange {
+                first: CellCoord {
+                    row: mc.row,
+                    col: mc.column,
+                },
+                last: CellCoord {
+                    row: mc.row + mc.height - 1,
+                    col: mc.column + mc.width - 1,
+                },
             })
-            .unwrap_or_else(|| RCRange::from_cell(row, column))
+            .unwrap_or(GridRange {
+                first: CellCoord { row, col: column },
+                last: CellCoord { row, col: column },
+            })
     })
 }
 

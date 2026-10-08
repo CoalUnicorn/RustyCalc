@@ -7,9 +7,10 @@ use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::structure::StructAction;
 use crate::model::{ActiveCellQuery, FormulaAnalyzer};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
-use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
+use iron_canvas_core::Point;
+use iron_canvas_core::scene_geometry::{GridHit, GridResize};
 
-use super::cursor_hint::HIT_ZONE;
+use super::cursor_hint::{HIT_ZONE, autofill_hit};
 use super::header_span::{Axis, full_header_span};
 use super::{CanvasHandle, with_canvas};
 
@@ -19,10 +20,12 @@ pub fn handle_dblclick(
     state: WorkbookState,
     icv: CanvasHandle,
 ) {
-    let x = ev.offset_x() as f64;
-    let y = ev.offset_y() as f64;
+    let point = Point {
+        x: ev.offset_x(),
+        y: ev.offset_y(),
+    };
 
-    if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
+    if let Some(target) = with_canvas(icv, |h| h.resize_target(point, HIT_ZONE)).flatten() {
         // Excel-style auto-fit: scan the whole used range (not just the
         // painted viewport), and when the boundary sits inside a full-header
         // multi-selection, fit every selected column/row to its OWN content.
@@ -32,13 +35,18 @@ pub fn handle_dblclick(
         // because ironcalc groups undo per call (`push_diff_list`).
         let (dim, area) = model.with_value(|m| (m.sheet_dimension(), CellArea::from_view(m)));
         match target {
-            ResizeTarget::ColumnEdge(col) => {
+            GridResize::Column(col) => {
                 let (first, last) = full_header_span(area, col, Axis::Col);
                 for c in first..=last {
                     // A failed measurement (no model, unreadable sheet or
                     // column extent) is not "no content": skip that column.
-                    let measured = with_canvas(icv, |ic| ic.fit_column_width(c, dim.r1, dim.r2))
-                        .and_then(|fit| fit.ok())
+                    let measured = model
+                        .with_value(|m| {
+                            icv.with_value(|slot| {
+                                slot.as_ref()
+                                    .and_then(|h| h.fit_column_width(m, c, dim.r1, dim.r2).ok())
+                            })
+                        })
                         .flatten();
                     if let Some(w) = measured {
                         execute(
@@ -53,13 +61,18 @@ pub fn handle_dblclick(
                     }
                 }
             }
-            ResizeTarget::RowEdge(row) => {
+            GridResize::Row(row) => {
                 let (first, last) = full_header_span(area, row, Axis::Row);
                 for r in first..=last {
                     // A failed measurement (no model, unreadable sheet or
-                    // column extent) is not "no content": skip that row.
-                    let measured = with_canvas(icv, |ic| ic.fit_row_height(r, dim.c1, dim.c2))
-                        .and_then(|fit| fit.ok())
+                    // row extent) is not "no content": skip that row.
+                    let measured = model
+                        .with_value(|m| {
+                            icv.with_value(|slot| {
+                                slot.as_ref()
+                                    .and_then(|h| h.fit_row_height(m, r, dim.c1, dim.c2).ok())
+                            })
+                        })
                         .flatten();
                     if let Some(h) = measured {
                         execute(
@@ -79,9 +92,13 @@ pub fn handle_dblclick(
         return;
     }
 
-    match with_canvas(icv, |ic| ic.hit_test(x, y)) {
-        Some(HitTest::Cell { .. }) | Some(HitTest::AutofillHandle { .. }) => {}
-        _ => return,
+    let cell = matches!(
+        with_canvas(icv, |h| h.hit_test(point)).flatten(),
+        Some(GridHit::Cell(_))
+    );
+    let near_handle = with_canvas(icv, |h| autofill_hit(h, model, point)).unwrap_or(false);
+    if !(cell || near_handle) {
+        return;
     }
     model.with_value(|m| {
         let ac = m.active_cell();

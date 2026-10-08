@@ -3,23 +3,22 @@
 //! Two top-level match blocks: the first applies resize deltas
 //! (ResizingCol/ResizingRow); the second runs the autoscroll edge
 //! check and dispatches the remaining drag modes (Selecting,
-//! Extending, Pointing, DraggingFormulaRef). Idle mousemove only
-//! updates `state.cursor_hint`.
+//! Extending, Pointing). Idle mousemove only updates `state.cursor_hint`.
 
 use leptos::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
 
-use crate::coord::{CellAddress, CellArea, RefNode, SheetRange};
+use crate::coord::{
+    CellAddress, CellArea, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW, RefNode,
+    SheetRange,
+};
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula::splice_ref;
 use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetRoster, try_mutate};
-use crate::state::{DragState, ModelStore, RefOverride, StatusMessage, WorkbookState};
-use iron_canvas_core::{
-    chrome::hit::HitTest,
-    geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
-};
-use iron_canvas_web::PixelRect;
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
+use iron_canvas_core::PixelRect;
+use iron_canvas_core::scene_geometry::GridHit;
 use ironcalc_base::UserModel;
 
 use super::cursor_hint::{clear_hover, set_hover_probe};
@@ -86,13 +85,19 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
             });
             // Resolve the new drag-target against the *previous* painted frame.
             // The scroll mutation above won't be reflected on canvas until the
-            // next renderPending — so hit_test against last_frame matches
+            // next render, so hit_test against the committed frame matches
             // what the user still sees.
-            if let Some(HitTest::Cell { row, column }) = with_canvas(icv, |ic| ic.hit_test(mx, my))
+            if let Some(GridHit::Cell(coord)) = with_canvas(icv, |h| {
+                h.hit_test(iron_canvas_core::Point {
+                    x: mx as i32,
+                    y: my as i32,
+                })
+            })
+            .flatten()
             {
                 state.drag.set(DragState::Extending {
-                    to_row: row,
-                    to_col: column,
+                    to_row: coord.row,
+                    to_col: coord.col,
                 });
             }
         }
@@ -189,8 +194,7 @@ pub fn handle_mousemove(
     if ev.buttons() == 0 {
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
-        state.dragged_ref_override.set(None);
-        set_hover_probe(state, icv, x, y);
+        set_hover_probe(state, model, icv, x, y);
         return;
     }
     // Any held button means no idle hover: the tooltip must not outlive the
@@ -266,47 +270,24 @@ pub fn handle_mousemove(
         | DragState::DraggingFormulaRef { .. } => {}
     }
 
-    // Formula-ref drag must resolve the pointer to a cell BEFORE the
-    // layer-aware `ic.hit_test` below — otherwise `FormulaRefsLayer`
-    // claims the hit whenever the cursor re-enters its own painted rect
-    // (i.e. shrink direction) and the let-else bails out, freezing the
-    // drag. `pixel_to_cell` walks only the chrome's pane_set, so any
-    // overlay above it is invisible to the resolution.
-    if let DragState::DraggingFormulaRef {
-        ref_idx,
-        zone,
-        anchor,
-        grab_cell,
-    } = state.drag.get_untracked()
-    {
-        let Some((row, col)) = with_canvas(icv, |ic| ic.pixel_to_cell(x, y)).flatten() else {
-            return;
-        };
-        let cursor = CellAddress {
-            sheet: anchor.sheet,
-            row,
-            column: col,
-        };
-        let new_range = dragged_ref_range(anchor, zone, grab_cell, cursor);
-        state.dragged_ref_override.set(Some(RefOverride {
-            idx: ref_idx,
-            range: new_range,
-        }));
-        ev.prevent_default();
-        return;
-    }
-
-    // Hit-test against the painted frame. Anything that isn't a Cell (header,
+    // Hit-test against the committed frame. Anything that isn't a Cell (header,
     // corner, autofill handle, off-canvas) means the drag-target sits outside
     // the scrollable grid — bail and let the autoscroll timer (if any)
     // continue to advance the viewport on its own cadence.
-    let Some(HitTest::Cell { row, column: col }) = with_canvas(icv, |ic| ic.hit_test(x, y)) else {
+    let Some(GridHit::Cell(coord)) = with_canvas(icv, |h| {
+        h.hit_test(iron_canvas_core::Point {
+            x: x as i32,
+            y: y as i32,
+        })
+    })
+    .flatten() else {
         return;
     };
+    let (row, col) = (coord.row, coord.col);
 
     // `None` until the first paint (no frame, so no pane geometry) — the drag
     // state below still updates, only the edge-scroll is skipped.
-    let pane = with_canvas(icv, |ic| ic.scroll_pane_rect()).flatten();
+    let pane = with_canvas(icv, |h| h.scroll_pane_rect()).flatten();
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {
@@ -393,12 +374,30 @@ pub fn handle_mousemove(
                 NavigationEvent::SelectionRangeChanged { sheet_area },
             ));
         }
-        // DraggingFormulaRef is handled by the early short-circuit above
-        // (before the layer-aware ic.hit_test that would otherwise let
-        // FormulaRefsLayer shadow the cell under the cursor).
-        DragState::DraggingFormulaRef { .. }
-        | DragState::Idle
-        | DragState::ResizingCol { .. }
-        | DragState::ResizingRow { .. } => {}
+        DragState::DraggingFormulaRef {
+            ref_idx,
+            zone,
+            anchor,
+            grab_cell,
+            preview,
+        } => {
+            let cursor = CellAddress {
+                sheet: anchor.sheet,
+                row,
+                column: col,
+            };
+            let new_preview = dragged_ref_range(anchor, zone, grab_cell, cursor);
+            if new_preview != preview {
+                state.drag.set(DragState::DraggingFormulaRef {
+                    ref_idx,
+                    zone,
+                    anchor,
+                    grab_cell,
+                    preview: new_preview,
+                });
+            }
+            ev.prevent_default();
+        }
+        DragState::Idle | DragState::ResizingCol { .. } | DragState::ResizingRow { .. } => {}
     }
 }

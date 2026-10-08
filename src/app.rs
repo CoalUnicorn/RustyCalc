@@ -44,11 +44,11 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
-    // Canvas orchestrator handle. App-level (like `clipboard`) because the
-    // toolbar and the hover tooltip read committed canvas state (link targets,
-    // cell rects) while the grid canvas is mounted by `Worksheet`, a sibling.
-    // `Worksheet` fills the slot on mount and empties it on cleanup.
-    let canvas_handle: CanvasHandle = StoredValue::new_local(None);
+    // Scene render handle. App-level (like `clipboard`) because the toolbar
+    // and the hover tooltip read committed canvas state (links, cell rects)
+    // while the grid canvas is mounted by `Worksheet`, a sibling. `Worksheet`
+    // fills the slot on mount and empties it on cleanup.
+    let canvas_handle: CanvasHandle = StoredValue::new_local(None::<crate::scene::SceneHandle>);
 
     // Pre-serialized model bytes refreshed by the debounced save. The
     // beforeunload handler reads these directly, sidestepping a 10-50ms
@@ -56,9 +56,6 @@ pub fn App() -> impl IntoView {
     let pre_serialized: StoredValue<Option<Vec<u8>>, LocalStorage> = StoredValue::new_local(None);
 
     provide_context(app_state);
-    // Provide PerfTimings independently so `try_mutate` can write phase
-    // samples without coupling the model layer to AppState.
-    provide_context(app_state.perf);
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);

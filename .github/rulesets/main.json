@@ -3,7 +3,7 @@
   "name": "main",
   "target": "branch",
   "source_type": "Repository",
-  "source": "CoalUnicorn/RustyCalc",
+  "source": "CoalUnicorn/RustyCalcTest",
   "enforcement": "active",
   "conditions": {
     "ref_name": {

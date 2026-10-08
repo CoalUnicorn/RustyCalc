@@ -10,16 +10,43 @@ use crate::components::ui::popover::Popover;
 use crate::input::link::activate_link;
 use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
+use iron_canvas_core::{PixelRect, Point};
+use ironcalc_base::types::Link;
+
+/// Committed link data for the hovered cell, extracted so it does not borrow
+/// the session.
+pub(crate) struct HoveredLink {
+    /// Visible fragment of the logical (merge-anchored) cell.
+    pub rect: PixelRect,
+    /// Tooltip text when set, otherwise the link's own target/location.
+    pub text: String,
+}
 
 /// Resolve the pointer against the committed frame for every tooltip action.
 pub(crate) fn hovered_link(
     canvas: CanvasHandle,
     pointer: Option<(f64, f64)>,
-) -> Option<iron_canvas_core::DisplayCell> {
+) -> Option<HoveredLink> {
     let (x, y) = pointer?;
-    with_canvas(canvas, |ic| ic.display_cell_at(x, y))
-        .flatten()
-        .filter(|cell| cell.link.is_some())
+    let point = Point {
+        x: x as i32,
+        y: y as i32,
+    };
+    with_canvas(canvas, |h| {
+        let cell = h.display_cell_at(point)?;
+        let link = cell.link?;
+        let text = match &link.link {
+            Link::External { target, tooltip } => tooltip.clone().unwrap_or_else(|| target.clone()),
+            Link::Internal { location, tooltip } => {
+                tooltip.clone().unwrap_or_else(|| location.clone())
+            }
+        };
+        Some(HoveredLink {
+            rect: cell.fragment.rect,
+            text,
+        })
+    })
+    .flatten()
 }
 
 /// Hover tooltip with an explicit Open action. Mounted inside the worksheet so
@@ -44,7 +71,7 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
         let anchor = state.hover_link.get().and_then(|_| {
             let cell = hovered_link(canvas_handle, state.hover_pointer.get())?;
             let canvas_box = grid_ref.get_untracked()?.get_bounding_client_rect();
-            Some((cell.fragment, canvas_box))
+            Some((cell.rect, canvas_box))
         });
 
         match anchor {
@@ -64,25 +91,21 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
         state
             .hover_link
             .get()
-            .and_then(|_| {
-                let cell = hovered_link(canvas_handle, state.hover_pointer.get())?;
-                let link = cell.link?;
-                Some(
-                    link.tooltip()
-                        .unwrap_or_else(|| link.target().as_str())
-                        .to_string(),
-                )
-            })
+            .and_then(|_| hovered_link(canvas_handle, state.hover_pointer.get()))
+            .map(|cell| cell.text)
             .unwrap_or_default()
     };
 
     let on_open = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
-        let Some(cell) = hovered_link(canvas_handle, state.hover_pointer.get_untracked()) else {
+        let Some((x, y)) = state.hover_pointer.get_untracked() else {
             return;
         };
-        if let Err(e) = activate_link(model, &state, canvas_handle, cell.anchor.r1, cell.anchor.c1)
-        {
+        let point = Point {
+            x: x as i32,
+            y: y as i32,
+        };
+        if let Err(e) = activate_link(model, &state, canvas_handle, point) {
             state.status.set(Some(StatusMessage::Error(e.to_string())));
         }
         // Following the target moves the selection, so the hover no longer

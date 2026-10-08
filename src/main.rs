@@ -15,7 +15,7 @@ mod coord;
 mod events;
 mod input;
 mod model;
-pub mod perf;
+mod scene;
 
 mod state;
 mod storage;

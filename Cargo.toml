@@ -11,11 +11,8 @@ readme = "README.md"
 leptos = { version = "0.8", features = ["csr"] }
 ironcalc_base = { version = "0.8.3", path = "IronCalc/base"  }
 ironcalc = { version = "0.8.3", path = "IronCalc/xlsx" }
-# The app binds its own Rust `CanvasModel` (`WorksheetModelAdapter`) and never
-# calls the JS `setModel` bridge, so the `js-model` default feature stays off.
-iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web", default-features = false }
-iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
-iron-canvas-ironcalc = { path = "iron-canvas/crates/iron-canvas-ironcalc" }
+iron-canvas-core = { path = "../iron-canvas/crates/iron-canvas-core" }
+iron-canvas-ironcalc = { path = "../iron-canvas/crates/iron-canvas-ironcalc" }
 
 
 web-sys = { version = "0.3", features = [
@@ -38,8 +35,9 @@ leptos-use = "0.19"
 js-sys = "0.3"  # For enhanced storage date/time functions
 thiserror = "2.0"  # For structured error types
 sha2 = { version = "0.11.0", default-features = false }
-iron-canvas-datagrid = { version = "0.1.0-beta.2", path = "iron-canvas/crates/iron-canvas-datagrid" }
-iron-canvas-canvas2d = { version = "0.1.0-beta.2", path = "iron-canvas/crates/iron-canvas-canvas2d" }
+iron-canvas-canvas2d = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas-canvas2d" }
+iron-canvas = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas" }
+iron-canvas-export = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas-export", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -53,6 +51,12 @@ panic = "abort"
 strip = true
 
 [features]
+default = ["export"]
 tauri = []
-dev-tools = ["iron-canvas-web/dev-tools", "export"]
-export = ["iron-canvas-web/pdf"]
+# PDF snapshot export for the File tab. SVG is always available through
+# `iron-canvas-export`'s `svg` feature, which this crate enables outright.
+export = ["iron-canvas-export/pdf"]
+
+[patch."https://github.com/CoalUnicorn/IronCalc"]
+ironcalc_base = { path = "IronCalc/base" }
+ironcalc = { path = "IronCalc/xlsx" }

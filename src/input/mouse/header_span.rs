@@ -6,8 +6,7 @@
 //! Extracted from `contextmenu.rs` so mousedown-resize and resize-by-value
 //! share one definition.
 
-use crate::coord::CellArea;
-use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use crate::coord::{CellArea, LAST_COLUMN, LAST_ROW};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {

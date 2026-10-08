@@ -1,11 +1,9 @@
-pub mod camera;
 pub mod editing;
 pub(crate) mod one_shot_raf;
 pub mod worksheet;
 
 use leptos::prelude::*;
 
-use crate::components::workbook::camera::CameraLayer;
 use crate::components::workbook::worksheet::Worksheet;
 use crate::components::{
     chrome::{
@@ -23,10 +21,7 @@ use crate::input::{
     keyboard::{KeyMod, SpreadsheetAction, classify_key, execute},
 };
 use crate::model::{AppClipboard, EvaluationMode, FormulaAnalyzer, PasteMode, mutate, try_mutate};
-use crate::state::{
-    CameraSpec, DragState, EditMode, ModelStore, PersistedCamera, StatusMessage, WorkbookState,
-};
-use gloo_storage::Storage as GlooStorage;
+use crate::state::{DragState, EditMode, ModelStore, StatusMessage, WorkbookState};
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling
 /// live here (need async OS APIs / DOM cursor position); everything else
@@ -240,40 +235,6 @@ pub fn Workbook() -> impl IntoView {
         }
     };
 
-    // Load cameras when the active workbook changes; save on any cameras mutation.
-    // The load fires cameras.set, which re-triggers save with identical data — harmless.
-    Effect::new(move |_| {
-        let Some(uuid) = state.current_uuid.get() else {
-            return;
-        };
-        let key = PersistedCamera::storage_key(&uuid.to_string());
-        let stored: Vec<PersistedCamera> =
-            <gloo_storage::LocalStorage as GlooStorage>::get(&key).unwrap_or_default();
-        state
-            .cameras
-            .set(stored.iter().map(CameraSpec::from).collect());
-    });
-
-    Effect::new(move |_| {
-        let cams = state.cameras.get();
-        let Some(uuid) = state.current_uuid.get_untracked() else {
-            return;
-        };
-        let key = PersistedCamera::storage_key(&uuid.to_string());
-        let stored: Vec<PersistedCamera> = cams.iter().map(PersistedCamera::from).collect();
-        if let Err(e) = <gloo_storage::LocalStorage as GlooStorage>::set(&key, &stored) {
-            leptos::logging::error!("camera persistence failed: {e:?}");
-        }
-    });
-
-    // The inspector mounts beside the worksheet, outside `StatusBar`, so no
-    // row-scoped overflow can clip it. It is a dev-tools surface: a production
-    // build mounts nothing.
-    #[cfg(feature = "dev-tools")]
-    let inspector = view! { <crate::components::panels::perf_panel::PerfPanel /> }.into_any();
-    #[cfg(not(feature = "dev-tools"))]
-    let inspector = ().into_any();
-
     view! {
         <div
             id="workbook"
@@ -285,11 +246,9 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-            <CameraLayer />
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />
-            {inspector}
         </div>
     }
 }
@@ -314,10 +273,9 @@ fn copy_to_app_clipboard(
                 area: app_cb.range,
             };
             clipboard_store.update_value(|c| *c = Some(app_cb));
-            // Wake the subscribe Effect so set_overlays repaints the
+            // Wake the subscribe Effect so the clipboard overlay repaints the
             // marching-ants border. The copied range isn't mutated, so this
-            // reuses the content strategy purely as a redraw trigger (overlay-only
-            // routing deferred — see SESSION.md).
+            // reuses the content event purely as a redraw trigger.
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                 sheet_area,
             }));

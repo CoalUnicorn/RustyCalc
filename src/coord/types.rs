@@ -10,9 +10,20 @@ use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
 
-pub use iron_canvas_core::address::FormulaRefKind;
-
 use crate::model::ArrowKey;
+
+/// Origin of an [`ActiveRef`]. The renderer treats all kinds the same today;
+/// `Direct` is the only draggable kind.
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+pub enum FormulaRefKind {
+    /// `A1`, `Sheet2!B3:C5` — a `Node::ReferenceKind` / `Node::RangeKind`
+    /// emission. Resolvable to coords; draggable in-place.
+    #[default]
+    Direct,
+    /// `my_range` ident bound to a defined name. Not draggable — moving it
+    /// would require rewriting the name binding, not the coord span.
+    DefinedName,
+}
 
 /// Cell or range reference carried through point-mode state as an ironcalc
 /// `Node`. Invariant: `inner` is `Node::ReferenceKind | Node::RangeKind`.
@@ -80,7 +91,7 @@ impl RefNode {
         }
     }
 
-    /// Promote a `SheetArea` into point-mode's carrier node.
+    /// Promote a `SheetRange` into point-mode's carrier node.
     ///
     /// Two ironcalc Node encoding rules govern this conversion:
     ///
@@ -142,86 +153,75 @@ impl RefNode {
         to_rc_format(&self.inner)
     }
 
-    /// Rewrite this ref's coordinates to `new` while preserving the
-    /// user-visible identity: sheet qualification (`Sheet!` prefix) and
-    /// per-axis absolute (`$`) flags. The dragged ref's text must keep
-    /// its `$A$1` / `Sheet2!` markup so the user's intent survives the
-    /// drag.
-    ///
-    /// Encoding rules mirror [`Self::from_cell_area`]:
-    /// - Relative axes store `coord - editing.*` so the stringifier emits
-    ///   the address against the editing cell's RC ctx.
-    /// - Absolute axes store the absolute 1-based coord unchanged.
-    /// - `sheet_name` is preserved from `self`; cross-sheet drag isn't
-    ///   supported, so `self.sheet_name.is_some()` implies the new ref
-    ///   is on the same other sheet.
-    ///
-    /// Cell<->range transitions: a single-cell self promotes to `RangeKind`
-    /// when `new` is multi-cell (duplicating both absolute flags onto the
-    /// new endpoint); a range self collapses to `ReferenceKind` when `new`
-    /// is a single cell (endpoint 1's flags win — TopLeft is the canonical
-    /// surviving corner).
+    /// Rewrite the referenced coordinates and keep the original `$` flags and
+    /// sheet prefix.
     pub fn with_area(&self, new: SheetRange, editing: CellAddress) -> Self {
-        let encode =
-            |abs: bool, coord: i32, base: i32| -> i32 { if abs { coord } else { coord - base } };
-        let (sheet_name, abs_r1, abs_c1, abs_r2, abs_c2) = match &self.inner {
-            Node::ReferenceKind {
-                sheet_name,
-                absolute_row,
-                absolute_column,
-                ..
-            } => (
-                sheet_name.clone(),
-                *absolute_row,
-                *absolute_column,
-                *absolute_row,
-                *absolute_column,
-            ),
-            Node::RangeKind {
-                sheet_name,
-                absolute_row1,
-                absolute_column1,
-                absolute_row2,
-                absolute_column2,
-                ..
-            } => (
-                sheet_name.clone(),
-                *absolute_row1,
-                *absolute_column1,
-                *absolute_row2,
-                *absolute_column2,
-            ),
-            _ => (None, false, false, false, false),
+        let encode = |absolute: bool, coordinate: i32, base: i32| -> i32 {
+            if absolute {
+                coordinate
+            } else {
+                coordinate - base
+            }
         };
+        let (sheet_name, absolute_row1, absolute_column1, absolute_row2, absolute_column2) =
+            match &self.inner {
+                Node::ReferenceKind {
+                    sheet_name,
+                    absolute_row,
+                    absolute_column,
+                    ..
+                } => (
+                    sheet_name.clone(),
+                    *absolute_row,
+                    *absolute_column,
+                    *absolute_row,
+                    *absolute_column,
+                ),
+                Node::RangeKind {
+                    sheet_name,
+                    absolute_row1,
+                    absolute_column1,
+                    absolute_row2,
+                    absolute_column2,
+                    ..
+                } => (
+                    sheet_name.clone(),
+                    *absolute_row1,
+                    *absolute_column1,
+                    *absolute_row2,
+                    *absolute_column2,
+                ),
+                _ => (None, false, false, false, false),
+            };
 
-        let a = new.area;
-        let inner = if a.is_single_cell() {
+        let area = new.area;
+        let inner = if area.is_single_cell() {
             Node::ReferenceKind {
                 sheet_name,
                 sheet_index: new.sheet,
-                absolute_row: abs_r1,
-                absolute_column: abs_c1,
-                row: encode(abs_r1, a.r1, editing.row),
-                column: encode(abs_c1, a.c1, editing.column),
+                absolute_row: absolute_row1,
+                absolute_column: absolute_column1,
+                row: encode(absolute_row1, area.r1, editing.row),
+                column: encode(absolute_column1, area.c1, editing.column),
             }
         } else {
             Node::RangeKind {
                 sheet_name,
                 sheet_index: new.sheet,
-                absolute_row1: abs_r1,
-                absolute_column1: abs_c1,
-                row1: encode(abs_r1, a.r1, editing.row),
-                column1: encode(abs_c1, a.c1, editing.column),
-                absolute_row2: abs_r2,
-                absolute_column2: abs_c2,
-                row2: encode(abs_r2, a.r2, editing.row),
-                column2: encode(abs_c2, a.c2, editing.column),
+                absolute_row1,
+                absolute_column1,
+                row1: encode(absolute_row1, area.r1, editing.row),
+                column1: encode(absolute_column1, area.c1, editing.column),
+                absolute_row2,
+                absolute_column2,
+                row2: encode(absolute_row2, area.r2, editing.row),
+                column2: encode(absolute_column2, area.c2, editing.column),
             }
         };
         Self { inner }
     }
 
-    /// Resolve the pointed-at cell(s) as a canonical `SheetArea` for overlay
+    /// Resolve the pointed-at cell(s) as a canonical `SheetRange` for overlay
     /// painting and viewport use.
     ///
     /// `editing` is the cell being edited — required because ironcalc stores
@@ -465,8 +465,8 @@ impl RefNode {
     /// Range endpoints advance independently, preserving mixed endpoint states.
     ///
     /// Re-encoding is the trap: a relative axis stores `coord - editing`, an
-    /// absolute axis stores the literal `coord` (mirroring [`Self::area`] /
-    /// [`Self::with_area`]). Flipping a flag therefore must add or subtract
+    /// absolute axis stores the literal `coord` (mirroring [`Self::area`]).
+    /// Flipping a flag therefore must add or subtract
     /// `editing.{row|column}`, not just toggle the boolean.
     pub fn cycle_absolute(&self, editing: &CellAddress) -> Self {
         // Excel's cycle in (row_abs, col_abs): (F,F)->(T,T)->(T,F)->(F,T)->(F,F).
@@ -864,6 +864,17 @@ pub fn selection_a1_qualified_absolute(model: &UserModel<'static>) -> String {
         )
     };
     node.to_localized(&CellAddress::from_view(model).as_stringify_ctx())
+}
+
+// ==============================================================================
+// Autofill-facing address shapes
+// ==============================================================================
+
+/// Target cell of an in-progress autofill-handle drag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutofillTarget {
+    pub row: i32,
+    pub col: i32,
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! The top-level transient UI state struct shared across all components.
 
 use gloo_storage::Storage as GlooStorage;
+use iron_canvas::OverlayState;
 use ironcalc_base::UserModel;
 use ironcalc_base::cf_types::CfRuleInput;
 use leptos::prelude::*;
@@ -11,10 +12,9 @@ use crate::model::CssColor;
 use crate::storage::WorkbookId;
 
 use super::autoscroll::AutoscrollState;
-use super::camera::CameraSpec;
 use super::context_menu::ContextMenuState;
 use super::cursor_hint::CursorHint;
-use super::drag::{DragState, RefOverride};
+use super::drag::DragState;
 use super::editing_cell::{EditFocus, EditingCell};
 use super::named_range::EditingDefinedName;
 use super::split::Split;
@@ -52,9 +52,14 @@ pub struct WorkbookState {
     /// signal: reading it from an input event describes the previous frame,
     /// because that event only schedules the paint which produces the next.
     pub(crate) committed_frame: Split<u64>,
-    /// Ghost-range published by `DragState::DraggingFormulaRef` mousemoves.
-    /// Cleared on mouseup, on Escape, and on the mouseup-missed bail-out.
-    pub(crate) dragged_ref_override: Split<Option<RefOverride>>,
+    /// Paint payload the subscribe Effect publishes for the scene renderer:
+    /// selection ranges, active cell, clipboard range and formula references.
+    /// The rAF loop reads it when it builds the frame request.
+    pub(crate) overlays: Split<OverlayState>,
+    /// Monotonic revision the render loop stamps into each `RenderRequest`.
+    /// Bumped by the subscribe Effect on any event or overlay change; the
+    /// scene session compares it to decide whether to re-prepare the frame.
+    pub(crate) render_revision: Split<u64>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
     pub(crate) autoscroll: AutoscrollState,
@@ -70,10 +75,6 @@ pub struct WorkbookState {
     /// Cancel). The dialog's `<FormulaInput>` reads/writes through this signal
     /// via the shared [`crate::input::formula::sync_edit`] helper.
     pub(crate) editing_named_range: Split<Option<EditingDefinedName>>,
-    /// Combined row+column header visibility (View -> Show Headers). App-level
-    /// view preference; not persisted in the workbook. Read untracked by the
-    /// canvas adapter; the toggle emits FormatEvent::LayoutChanged to repaint.
-    pub(crate) show_headers: Split<bool>,
     /// In-progress rule edit for the CF dialog. `None` while no rule is being
     /// edited (initial state, or after Save / Cancel).
     pub(crate) editing_cf_rule: Split<Option<CfRuleEditState>>,
@@ -82,8 +83,6 @@ pub struct WorkbookState {
     /// `Effect` in the `RangePickerInput` mirrors every selection change into
     /// that field's text. See [`RangeCaptureTarget`].
     pub(crate) range_capture: Split<Option<RangeCaptureTarget>>,
-    /// Active floating Camera widgets. See [`CameraSpec`].
-    pub(crate) cameras: Split<Vec<CameraSpec>>,
 }
 
 /// Identifies the drawer field that is armed to receive grid selections.
@@ -99,9 +98,6 @@ pub enum RangeCaptureTarget {
     CfFormula,
     /// The Named Range "Refers to" formula (qualified absolute `Sheet1!$B$2:$D$8`).
     NamedRange,
-    /// A camera widget's source range; keyed by the widget's `id` so multiple
-    /// cameras can each have their own settings popover without aliasing.
-    Camera(u32),
 }
 
 /// Which drawer panel (if any) is currently open on the right side.
@@ -149,25 +145,24 @@ impl WorkbookState {
             hover_link: Split::new(None),
             hover_pointer: Split::new(None),
             committed_frame: Split::new(0),
-            dragged_ref_override: Split::new(None),
+            overlays: Split::new(OverlayState::default()),
+            render_revision: Split::new(0),
             context_menu: Split::new(None),
             status: Split::new(None),
             autoscroll: AutoscrollState::new(),
             scroll_into_view: StoredValue::new(false),
             active_drawer: Split::new(None),
             editing_named_range: Split::new(None),
-            show_headers: Split::new(true),
             editing_cf_rule: Split::new(None),
             range_capture: Split::new(None),
-            cameras: Split::new(Vec::new()),
         }
     }
 
     /// Reset all transient view/edit state to its initial (post-`new`) values.
     /// Call this whenever the active workbook is swapped: the CF/named-range
     /// drawers are non-modal and resolve their target lazily, so a rule left
-    /// mid-edit would Save into the new workbook, and an armed range-capture or
-    /// the old workbook's cameras would point at sheets that no longer exist
+    /// mid-edit could Save into the new workbook, or an armed range capture
+    /// could point at a sheet that no longer exists
     /// (#22). `DocumentReset` can't drive this — row/col ops emit it too and
     /// must not wipe open drawers.
     pub(crate) fn reset_view_state(&self) {
@@ -178,7 +173,6 @@ impl WorkbookState {
         self.editing_named_range.set(None);
         self.editing_cf_rule.set(None);
         self.range_capture.set(None);
-        self.cameras.set(Vec::new());
     }
 
     /// Active point-mode reference as a `RefNode`, or a 1x1 reference at the

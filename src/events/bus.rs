@@ -6,11 +6,6 @@ use super::{
     ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent, ThemeEvent,
 };
 
-/// Ordered observer of one emitted batch. Runs before the category signals
-/// take ownership of the payloads.
-#[cfg(feature = "dev-tools")]
-pub type BatchObserver = std::rc::Rc<dyn Fn(u64, &[SpreadsheetEvent])>;
-
 /// Per-category event signals. Each holds events from the most recent
 /// `emit_event(s)` call — replaced (not appended) on each emit.
 #[derive(Clone, Copy)]
@@ -28,16 +23,6 @@ pub struct EventBus {
     /// that reuse targets. Non-reactive; the canvas reads it with
     /// `get_value` and compares it, so a value that does not move is free.
     pub metadata_seq: StoredValue<u64, LocalStorage>,
-    /// Capture observer. Non-reactive: installing it must not re-run any
-    /// subscriber, and it is not a rendering input.
-    #[cfg(feature = "dev-tools")]
-    batch_observer: StoredValue<Option<BatchObserver>, LocalStorage>,
-    /// Monotonic batch counter, bumped once per observed emit.
-    #[cfg(feature = "dev-tools")]
-    batch_seq: StoredValue<u64, LocalStorage>,
-    /// Re-entrancy guard for the debug assertion in [`EventBus::observe`].
-    #[cfg(feature = "dev-tools")]
-    observing: StoredValue<bool, LocalStorage>,
 }
 
 impl EventBus {
@@ -49,46 +34,7 @@ impl EventBus {
             structure: RwSignal::new(vec![]),
             theme: RwSignal::new(vec![]),
             metadata_seq: StoredValue::new_local(0),
-            #[cfg(feature = "dev-tools")]
-            batch_observer: StoredValue::new_local(None),
-            #[cfg(feature = "dev-tools")]
-            batch_seq: StoredValue::new_local(0),
-            #[cfg(feature = "dev-tools")]
-            observing: StoredValue::new_local(false),
         }
-    }
-
-    /// Install or clear the capture observer.
-    ///
-    /// The observer runs **before** the category signals take the payloads,
-    /// because afterwards there is no intact batch to borrow. It therefore
-    /// must not read the category signals — it sees the events only — and it
-    /// must not emit a worksheet event.
-    #[cfg(feature = "dev-tools")]
-    pub fn set_batch_observer(&self, observer: Option<BatchObserver>) {
-        self.batch_observer.set_value(observer);
-    }
-
-    /// Hand one borrowed batch to the observer, if one is installed.
-    ///
-    /// Returns whether an observer saw it. The batch counter advances only
-    /// when an observer is present, so a build without capture keeps today's
-    /// path exactly.
-    #[cfg(feature = "dev-tools")]
-    fn observe(&self, events: &[SpreadsheetEvent]) -> bool {
-        let Some(observer) = self.batch_observer.get_value() else {
-            return false;
-        };
-        debug_assert!(
-            !self.observing.get_value(),
-            "batch observer re-entered: an observer must not emit a worksheet event"
-        );
-        let batch_id = self.batch_seq.get_value().wrapping_add(1);
-        self.batch_seq.set_value(batch_id);
-        self.observing.set_value(true);
-        observer(batch_id, events);
-        self.observing.set_value(false);
-        true
     }
 
     /// Single-event fast path (the common case: arrow-key nav fires ~30/s,
@@ -101,10 +47,6 @@ impl EventBus {
     /// `update` is used (not `set`) so a repeated event on the same range still
     /// notifies — `set`'s `PartialEq` check would suppress it.
     pub fn emit_event(&self, event: SpreadsheetEvent) {
-        // One batch identity, then the borrowed batch, then the category
-        // write. `from_ref` borrows the event without cloning or allocating.
-        #[cfg(feature = "dev-tools")]
-        self.observe(std::slice::from_ref(&event));
         // A navigation event cannot change a link or a merge list, so it does
         // not advance the metadata epoch. Everything else can.
         let touches_metadata = !matches!(event, SpreadsheetEvent::Navigation(_));
@@ -182,15 +124,6 @@ impl EventBus {
     }
 
     pub fn emit_events(&self, new_events: impl IntoIterator<Item = SpreadsheetEvent>) {
-        // With an observer installed the batch must exist as one borrowed
-        // slice before any payload moves. Without one, the events go straight
-        // to the per-category distribution: no extra vector, no counter read.
-        #[cfg(feature = "dev-tools")]
-        if self.batch_observer.get_value().is_some() {
-            let batch: Vec<SpreadsheetEvent> = new_events.into_iter().collect();
-            self.observe(&batch);
-            return self.publish(batch);
-        }
         self.publish(new_events);
     }
 

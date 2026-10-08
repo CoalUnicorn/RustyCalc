@@ -227,12 +227,16 @@ fn autofill_preview_and_commit_submit_one_target() {
     });
 }
 
+/// A covered pointer resolves to the merge's anchor link and to the whole
+/// merged fragment, so the hover tooltip anchors to the cell the user sees.
 #[wasm_bindgen_test]
 fn tooltip_resolves_a_covered_pointer_to_the_anchor_link_and_fragment() {
     use crate::components::panels::link_tooltip::hovered_link;
+    use crate::scene::{SceneHandle, request_for};
+    use iron_canvas::{OverlayState, RevisionToken};
+    use iron_canvas_core::{CanvasSize, CanvasTheme, CellCoord};
     use ironcalc_base::expressions::types::Area;
     use ironcalc_base::types::Link;
-    use std::rc::Rc;
     use wasm_bindgen::JsCast;
 
     Owner::new().with(|| {
@@ -267,21 +271,27 @@ fn tooltip_resolves_a_covered_pointer_to_the_anchor_link_and_fragment() {
             None,
         )
         .expect("anchor link");
-        let mut canvas =
-            iron_canvas_web::IronCanvas::create(make_canvas(), make_canvas()).expect("renderer");
-        canvas.resize(400.0, 300.0, 1.0).expect("size");
-        canvas.set_model(Rc::new(iron_canvas_ironcalc::IronCalcModel(m)));
-        canvas.render_pending();
-        let point = canvas.cell_rect(3, 3).expect("covered cell").center();
-        let handle = StoredValue::new_local(Some(canvas));
-        let cell = hovered_link(handle, Some((f64::from(point.x), f64::from(point.y))))
-            .expect("logical tooltip");
-        assert_eq!((cell.anchor.r1, cell.anchor.c1), (2, 2));
-        assert_eq!(
-            cell.link.as_ref().and_then(|l| l.tooltip()),
-            Some("destination")
+        let size = CanvasSize { w: 400.0, h: 300.0 };
+        let mut handle = SceneHandle::new(make_canvas(), size, 1.0).expect("scene session");
+        let request = request_for(
+            0,
+            CellCoord { row: 1, col: 1 },
+            size,
+            CanvasTheme::light(),
+            OverlayState::default(),
+            RevisionToken {
+                workbook_id: 1,
+                revision: 0,
+            },
         );
-        assert_eq!(cell.link.as_ref().map(|l| l.target().as_str()), Some("A20"));
-        assert!(cell.fragment.width > 80);
+        handle.render(&m, &request).expect("render");
+        let point = handle.cell_rect(3, 3).expect("covered cell").center();
+        let slot = StoredValue::new_local(Some(handle));
+        let cell = hovered_link(slot, Some((f64::from(point.x), f64::from(point.y))))
+            .expect("logical tooltip");
+        // The covered pointer resolves through the merge to the anchor's link
+        // (its text) and to the whole merged fragment (its width).
+        assert_eq!(cell.text, "destination");
+        assert!(cell.rect.width > 80);
     });
 }

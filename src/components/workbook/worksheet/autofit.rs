@@ -15,13 +15,13 @@
 
 use leptos::prelude::*;
 
+use crate::coord::DEFAULT_ROW_HEIGHT;
 use crate::events::ContentEvent;
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::mouse::CanvasHandle;
 use crate::input::structure::StructAction;
 use crate::model::ActiveCellQuery;
 use crate::state::{ModelStore, WorkbookState};
-use iron_canvas_core::geometry::constants::DEFAULT_ROW_HEIGHT;
 
 /// Slack so a fitted height a hair above the current one (float rounding in
 /// the measure pass) doesn't churn a redundant resize + undo step.
@@ -62,9 +62,11 @@ pub(super) fn install_autofit_effect(
             // Renderer measures wrapped line count against live model text.
             // A failed measurement (no model, unreadable sheet or column
             // extent) is not "no content": leave that row at its height.
-            let fitted = canvas_handle.with_value(|slot| {
-                slot.as_ref()
-                    .and_then(|ic| ic.fit_row_height(row, dim.c1, dim.c2).ok())
+            let fitted = model.with_value(|m| {
+                canvas_handle.with_value(|slot| {
+                    slot.as_ref()
+                        .and_then(|handle| handle.fit_row_height(m, row, dim.c1, dim.c2).ok())
+                })
             });
             let Some(Some(fitted)) = fitted else {
                 continue;

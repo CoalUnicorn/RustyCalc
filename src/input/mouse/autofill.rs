@@ -14,9 +14,8 @@ use ironcalc_base::types::MergedCell;
 
 use leptos::prelude::WithValue;
 
-use crate::coord::CellArea;
+use crate::coord::{AutofillTarget, CellArea};
 use crate::state::ModelStore;
-use iron_canvas_core::AutofillTarget;
 
 /// The one fill target the host both previews and submits.
 ///
@@ -34,6 +33,46 @@ pub fn resolved_fill_target(model: ModelStore, to_row: i32, to_col: i32) -> Auto
             &merges,
         )
     })
+}
+
+/// The cells beyond the source that an in-progress fill will populate.
+///
+/// The extension includes the snapped target and follows the same axis the
+/// commit path will fill, so its overlay touches the source selection without
+/// painting a gap or covering the source twice.
+pub(crate) fn preview_fill_extension(source: CellArea, target: AutofillTarget) -> Option<CellArea> {
+    let source = source.normalized();
+    if target.row < source.r1 {
+        Some(CellArea {
+            r1: target.row,
+            c1: source.c1,
+            r2: source.r1 - 1,
+            c2: source.c2,
+        })
+    } else if target.row > source.r2 {
+        Some(CellArea {
+            r1: source.r2 + 1,
+            c1: source.c1,
+            r2: target.row,
+            c2: source.c2,
+        })
+    } else if target.col < source.c1 {
+        Some(CellArea {
+            r1: source.r1,
+            c1: target.col,
+            r2: source.r2,
+            c2: source.c1 - 1,
+        })
+    } else if target.col > source.c2 {
+        Some(CellArea {
+            r1: source.r1,
+            c1: source.c2 + 1,
+            r2: source.r2,
+            c2: target.col,
+        })
+    } else {
+        None
+    }
 }
 
 /// Snap the autofill drag target out of any merge it lands inside.
@@ -189,5 +228,39 @@ mod tests {
         let merges = [merge(1, 3, 2, 3)]; // columns 3..=4
         let target = snap_autofill_target(area(1, 8, 1, 8), 1, 4, &merges);
         assert_eq!((target.row, target.col), (1, 3));
+    }
+
+    #[test]
+    fn vertical_fill_preview_covers_the_extension_in_both_directions() {
+        let source = area(3, 2, 4, 3);
+        assert_eq!(
+            preview_fill_extension(source, AutofillTarget { row: 7, col: 2 }),
+            Some(area(5, 2, 7, 3))
+        );
+        assert_eq!(
+            preview_fill_extension(source, AutofillTarget { row: 1, col: 2 }),
+            Some(area(1, 2, 2, 3))
+        );
+    }
+
+    #[test]
+    fn horizontal_fill_preview_covers_the_extension_in_both_directions() {
+        let source = area(3, 2, 4, 3);
+        assert_eq!(
+            preview_fill_extension(source, AutofillTarget { row: 3, col: 7 }),
+            Some(area(3, 4, 4, 7))
+        );
+        assert_eq!(
+            preview_fill_extension(source, AutofillTarget { row: 3, col: 1 }),
+            Some(area(3, 1, 4, 1))
+        );
+    }
+
+    #[test]
+    fn a_target_inside_the_source_has_no_fill_preview_extension() {
+        assert_eq!(
+            preview_fill_extension(area(3, 2, 4, 3), AutofillTarget { row: 3, col: 3 }),
+            None
+        );
     }
 }

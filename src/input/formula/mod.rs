@@ -5,7 +5,7 @@
 //! - [`FormulaStatus`] — diagnostic state of a formula
 //! - [`is_in_reference_mode`] — cursor-context query for ref insertion
 //! - [`splice_ref`] / [`splice_dragged_ref`] / [`try_point_move`] — pure
-//!   transforms on formula text for point-mode editing
+//!   transforms on formula text for point-mode and formula-reference editing
 //! - [`sync_edit`] / [`edit_sync::FormulaEditState`] — keystroke-to-state pipeline
 //!   shared by cell editor, formula bar, and the named-ranges dialog
 

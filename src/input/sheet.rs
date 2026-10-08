@@ -57,14 +57,11 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
             // on the outgoing sheet and is cancelled.
             match state.drag.get_untracked() {
                 DragState::Idle | DragState::Pointing { .. } => {}
-                DragState::DraggingFormulaRef { .. } => {
-                    state.dragged_ref_override.set(None);
-                    state.drag.set(DragState::Idle);
-                }
                 DragState::Selecting
                 | DragState::Extending { .. }
                 | DragState::ResizingCol { .. }
-                | DragState::ResizingRow { .. } => state.drag.set(DragState::Idle),
+                | DragState::ResizingRow { .. }
+                | DragState::DraggingFormulaRef { .. } => state.drag.set(DragState::Idle),
             }
 
             if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {

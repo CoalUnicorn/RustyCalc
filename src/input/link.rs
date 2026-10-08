@@ -18,7 +18,7 @@ use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::model::{EvaluationMode, FormulaAnalyzer, Navigator, try_mutate};
 use crate::state::{ModelStore, WorkbookState};
 
-use iron_canvas_core::LinkTarget;
+use iron_canvas_core::Point;
 use ironcalc_base::UserModel;
 use ironcalc_base::types::Link;
 
@@ -171,7 +171,7 @@ pub(crate) fn write_cell_link(
 ///
 /// A label write changes cell content, so the values of formulas that
 /// reference the cell can change. A consumer that watches only its own range
-/// — a camera, a second pane — learns that from `CalculationUpdated` alone:
+/// learns that from `CalculationUpdated` alone:
 /// the anchor `CellChanged` marks the anchor's row. A link write with no label
 /// change is metadata (no formula value reads a link), so the anchor-only
 /// notification stays exact.
@@ -221,7 +221,12 @@ pub fn execute_link(
 ) -> Result<(), LinkError> {
     let anchor = model.with_value(CellAddress::from_view);
     let area = model.with_value(|m| CellArea::from_view(m).normalized());
-    let plan = plan_link_action(action, area, anchor, link_is_dynamic(icv, anchor))?;
+    let plan = plan_link_action(
+        action,
+        area,
+        anchor,
+        committed_link_is_dynamic(icv, anchor.row, anchor.column),
+    )?;
     let old_value = model.with_value(|m| cell_text(m, anchor));
 
     let mut content_written = false;
@@ -267,24 +272,24 @@ pub fn execute_link(
     Ok(())
 }
 
-/// Follow the link committed at `(row, column)`.
+/// Follow the link committed under `point`.
 ///
-/// `row` / `column` come from the painted-frame hit test, so the lookup reads
-/// committed canvas state (`link_at`) and never touches the model unless an
-/// internal target is actually followed. A `None` link is a no-op.
+/// `point` is the canvas-local pointer, resolved against the painted frame, so
+/// the lookup reads committed canvas state (`link_at`) and never touches the
+/// model unless an internal target is actually followed. A `None` link is a
+/// no-op.
 pub fn activate_link(
     model: ModelStore,
     state: &WorkbookState,
     icv: CanvasHandle,
-    row: i32,
-    column: i32,
+    point: Point,
 ) -> Result<(), LinkError> {
-    let Some(link) = with_canvas(icv, |ic| ic.link_at(row, column)).flatten() else {
+    let Some(link) = with_canvas(icv, |h| h.link_at(point).cloned()).flatten() else {
         return Ok(());
     };
-    match link.target() {
-        LinkTarget::External(url) => open_external(url),
-        LinkTarget::Internal(location) => navigate_internal(model, state, location),
+    match link.link {
+        Link::External { target, .. } => open_external(&target),
+        Link::Internal { location, .. } => navigate_internal(model, state, &location),
     }
 }
 
@@ -371,14 +376,19 @@ fn navigate_internal(
     Ok(())
 }
 
-/// True when the committed link of `address` is owned by a formula. One
-/// committed lookup: the link index is sparse, so no cell scan is needed.
-/// Without a mounted canvas there is no committed link state, hence nothing
-/// to protect.
-fn link_is_dynamic(icv: CanvasHandle, address: CellAddress) -> bool {
-    with_canvas(icv, |ic| ic.link_at(address.row, address.column))
-        .flatten()
-        .is_some_and(|link| link.is_dynamic())
+/// True when the committed link attached to `(row, column)` is owned by a
+/// formula. The scene exposes links by canvas point, so the cell's committed
+/// rect supplies the probe point; a cell that is not in the painted frame has
+/// no committed link to protect.
+pub(crate) fn committed_link_is_dynamic(icv: CanvasHandle, row: i32, column: i32) -> bool {
+    with_canvas(icv, |h| {
+        h.cell_rect(row, column).and_then(|rect| {
+            let center = rect.center();
+            h.link_at(center).map(|link| link.dynamic)
+        })
+    })
+    .flatten()
+    .unwrap_or(false)
 }
 
 /// Resolve a link `location` to the first reference it names.

@@ -1,10 +1,7 @@
 mod alignment;
-mod camera;
 pub(crate) mod chrome_controls;
 mod color_pickers;
 mod conditional_formatting;
-#[cfg(feature = "dev-tools")]
-mod dev_tools;
 mod file_ops;
 mod font;
 mod format_toggles;
@@ -29,7 +26,6 @@ use crate::model::{ActiveCellQuery, frontend_types::ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 
 use alignment::{AlignButtons, VertAlignButtons};
-use camera::InsertCamera;
 use color_pickers::{BackgroundColorPickerToolbar, TextColorPickerToolbar};
 use conditional_formatting::ConditionalFormattingButton;
 use font::{FontFamily, FontSize};
@@ -48,7 +44,7 @@ use section::{ToolSlot, ToolbarSection};
 use share_controls::ShareControls;
 use style::BorderPicker;
 use tab_strip::TabStrip;
-use view_options::{GridLinesToggle, ShowHeadersToggle};
+use view_options::GridLinesToggle;
 
 /// Two-tier toolbar: a tab strip selecting a `ToolbarSection`, above a single
 /// overflow row whose slots are rebuilt for the active section.
@@ -129,15 +125,7 @@ pub fn Toolbar() -> impl IntoView {
         ],
         ToolbarSection::View => vec![
             ToolSlot::new("Freeze", || view! { <FreezePane /> }.into_any()),
-            ToolSlot::new("Headers", || view! { <ShowHeadersToggle /> }.into_any()),
             ToolSlot::new("Gridlines", || view! { <GridLinesToggle /> }.into_any()),
-            ToolSlot::new("Camera", || view! { <InsertCamera /> }.into_any()),
-            // The inspector is dev-tools only, so the production toolbar has
-            // no launcher slot at all.
-            #[cfg(feature = "dev-tools")]
-            ToolSlot::new("Developer", || {
-                view! { <dev_tools::DevToolsLauncher /> }.into_any()
-            }),
         ],
         ToolbarSection::File => {
             vec![ToolSlot::new("File", || view! { <FileOps /> }.into_any())]

@@ -1,70 +1,54 @@
-//! Formula-reference drag sub-grammar.
-//!
-//! When the user grabs a coloured reference rectangle on the canvas
-//! during point-mode (formula editing), this module owns the drag
-//! lifecycle: start, range computation each mousemove, commit on
-//! mouseup. The dragged ref splicing back into the formula buffer
-//! lives in `crate::input::formula::splice_dragged_ref`.
+//! Drag operations for direct formula references.
 
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, SheetRange};
+use crate::coord::{CellAddress, FormulaRefKind, LAST_COLUMN, LAST_ROW, SheetRange};
 use crate::input::formula::splice_dragged_ref;
 use crate::model::FormulaAnalyzer;
-use crate::state::{DragState, ModelStore, RefOverride, WorkbookState};
-use iron_canvas_core::chrome::hit::RefZone;
-use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use iron_canvas_core::geometry::prim::{RectCorner, Side};
+use crate::state::{DragState, ModelStore, WorkbookState};
+use iron_canvas::{FormulaRefHit, RefCorner, RefZone};
+use iron_canvas_core::Side;
 
-/// never runs. `ev.prevent_default()` only suppresses the browser default.
+pub(super) fn draggable_ref_indices(refs: &[crate::coord::ActiveRef]) -> Vec<usize> {
+    refs.iter()
+        .enumerate()
+        .filter_map(|(index, reference)| {
+            matches!(reference.kind, FormulaRefKind::Direct).then_some(index)
+        })
+        .collect()
+}
+
 pub(super) fn handle_formula_ref_mousedown(
     ev: &web_sys::MouseEvent,
-    ref_idx: usize,
-    zone: RefZone,
-    grab_row: i32,
-    grab_col: i32,
-    _model: ModelStore,
+    hit: FormulaRefHit,
     state: WorkbookState,
 ) {
     let Some(editing) = state.editing_cell.get_untracked() else {
         return;
     };
-    let Some(active_ref) = editing.formula_analysis.refs().get(ref_idx) else {
+    let Some(reference) = editing.formula_analysis.refs().get(hit.ref_idx) else {
         return;
     };
-    let anchor = active_ref.sheet_area;
-    // Pin grab_cell's sheet to the anchor's sheet — one source of truth for
-    // the drag's sheet. The selected sheet can't shift mid-drag while the
-    // editor is open, but the invariant lives in the type, not in another
-    // invariant.
+    if !matches!(reference.kind, FormulaRefKind::Direct) {
+        return;
+    }
+
+    let anchor = reference.sheet_area;
     let grab_cell = CellAddress {
         sheet: anchor.sheet,
-        row: grab_row,
-        column: grab_col,
+        row: hit.grab_cell.row,
+        column: hit.grab_cell.col,
     };
     state.drag.set(DragState::DraggingFormulaRef {
-        ref_idx,
-        zone,
+        ref_idx: hit.ref_idx,
+        zone: hit.zone,
         anchor,
         grab_cell,
+        preview: anchor,
     });
-    state.dragged_ref_override.set(Some(RefOverride {
-        idx: ref_idx,
-        range: anchor,
-    }));
     ev.prevent_default();
 }
 
-/// Splice the dropped ref's new text into the formula at mouseup.
-///
-/// Builds a new `RefNode` via `RefNode::with_area` so `$`-flags and
-/// `Sheet!` prefix survive, stringifies it, and splices through the same
-/// `splice_ref` keystroke buffer the point-mode drag uses. The drop-on-
-/// origin no-op (drop coincides with the ref's current area — Excel
-/// ignores it) is decided inside `splice_dragged_ref`, which returns
-/// `None` and short-circuits the rewrite. Re-runs `analyze_formula` on
-/// the new text; the reactive subscription on `editing_cell` then
-/// republishes the overlay with refs at their new positions.
 pub(super) fn commit_formula_ref_drag(
     ref_idx: usize,
     new_range: SheetRange,
@@ -74,71 +58,122 @@ pub(super) fn commit_formula_ref_drag(
     let Some(edit) = state.editing_cell.get_untracked() else {
         return;
     };
-    let Some(active_ref) = edit.formula_analysis.refs().get(ref_idx) else {
+    let Some(reference) = edit.formula_analysis.refs().get(ref_idx) else {
         return;
     };
-    let original_ref = active_ref.ref_node.clone();
-    let span = active_ref.span;
-    let Some((new_text, new_span)) =
-        splice_dragged_ref(&edit.text, span, &original_ref, new_range, edit.address)
-    else {
-        // Drop-on-origin no-op (drop coincides with the ref's current area).
+    let Some((new_text, new_span)) = splice_dragged_ref(
+        &edit.text,
+        reference.span,
+        &reference.ref_node,
+        new_range,
+        edit.address,
+    ) else {
         return;
     };
-    state.editing_cell.update(|c| {
-        if let Some(e) = c {
-            e.cursor = new_span.end;
-            e.formula_analysis = model.with_value(|m| m.analyze_at(&new_text, e.address));
-            e.text = new_text;
+
+    state.editing_cell.update(|current| {
+        if let Some(edit) = current {
+            edit.cursor = new_span.end;
+            edit.formula_analysis = model.with_value(|m| m.analyze_at(&new_text, edit.address));
+            edit.text = new_text;
         }
     });
 }
 
-/// Compute the dragged ref's new range from the grab zone and the cursor cell.
-///
-/// `zone` picks which part of `anchor` moves (a corner/edge for a resize, the
-/// whole body for a translate); the result is clamped at the sheet origin
-/// rather than producing zero-based addresses.
 pub(crate) fn dragged_ref_range(
     anchor: SheetRange,
     zone: RefZone,
     grab_cell: CellAddress,
     cursor: CellAddress,
 ) -> SheetRange {
-    let a = anchor.area;
-    let cell = |r: i32, c: i32, r2: i32, c2: i32| {
-        let r1 = r.max(1).min(r2);
-        let c1 = c.max(1).min(c2);
-        let r2 = r2.clamp(1, LAST_ROW);
-        let c2 = c2.clamp(1, LAST_COLUMN);
-        SheetRange::new(anchor.sheet, r1, c1, r2, c2)
+    let area = anchor.area;
+    let resize = |row1: i32, col1: i32, row2: i32, col2: i32| {
+        let row1 = row1.max(1).min(row2);
+        let col1 = col1.max(1).min(col2);
+        let row2 = row2.clamp(1, LAST_ROW);
+        let col2 = col2.clamp(1, LAST_COLUMN);
+        SheetRange::new(anchor.sheet, row1, col1, row2, col2)
     };
+
     match zone {
         RefZone::Body => {
-            // Drag math operates on the visually painted rect — normalize so
-            // a user-typed `B6:B4` translates the same as `B4:B6`.
-            let n = a.normalized();
-            let dr = cursor.row - grab_cell.row;
-            let dc = cursor.column - grab_cell.column;
-            // Clamp the leading corner; apply the *clamped* delta to the
-            // trailing corner so width/height stay constant (Excel-like move).
-            let max_r1 = LAST_ROW - n.height() + 1;
-            let max_c1 = LAST_COLUMN - n.width() + 1;
-            let new_r1 = (n.r1 + dr).clamp(1, max_r1);
-            let new_c1 = (n.c1 + dc).clamp(1, max_c1);
-            let actual_dr = new_r1 - n.r1;
-            let actual_dc = new_c1 - n.c1;
-            let new_r2 = n.r2 + actual_dr;
-            let new_c2 = n.c2 + actual_dc;
-            SheetRange::new(anchor.sheet, new_r1, new_c1, new_r2, new_c2)
+            let normalized = area.normalized();
+            let delta_row = cursor.row - grab_cell.row;
+            let delta_column = cursor.column - grab_cell.column;
+            let max_row1 = LAST_ROW - normalized.height() + 1;
+            let max_col1 = LAST_COLUMN - normalized.width() + 1;
+            let row1 = (normalized.r1 + delta_row).clamp(1, max_row1);
+            let col1 = (normalized.c1 + delta_column).clamp(1, max_col1);
+            let actual_row_delta = row1 - normalized.r1;
+            let actual_column_delta = col1 - normalized.c1;
+            SheetRange::new(
+                anchor.sheet,
+                row1,
+                col1,
+                normalized.r2 + actual_row_delta,
+                normalized.c2 + actual_column_delta,
+            )
         }
-        RefZone::Edge(Side::Top) => cell(cursor.row, a.c1, a.r2, a.c2),
-        RefZone::Edge(Side::Bottom) => cell(a.r1, a.c1, cursor.row, a.c2),
-        RefZone::Edge(Side::Left) => cell(a.r1, cursor.column, a.r2, a.c2),
-        RefZone::Edge(Side::Right) => cell(a.r1, a.c1, a.r2, cursor.column),
-        RefZone::Corner(RectCorner::TopLeft) => cell(cursor.row, cursor.column, a.r2, a.c2),
-        RefZone::Corner(RectCorner::TopRight) => cell(cursor.row, a.c1, a.r2, cursor.column),
-        RefZone::Corner(RectCorner::BottomLeft) => cell(a.r1, cursor.column, cursor.row, a.c2),
-        RefZone::Corner(RectCorner::BottomRight) => cell(a.r1, a.c1, cursor.row, cursor.column),
+        RefZone::Edge(Side::Top) => resize(cursor.row, area.c1, area.r2, area.c2),
+        RefZone::Edge(Side::Bottom) => resize(area.r1, area.c1, cursor.row, area.c2),
+        RefZone::Edge(Side::Left) => resize(area.r1, cursor.column, area.r2, area.c2),
+        RefZone::Edge(Side::Right) => resize(area.r1, area.c1, area.r2, cursor.column),
+        RefZone::Corner(RefCorner::TopLeft) => resize(cursor.row, cursor.column, area.r2, area.c2),
+        RefZone::Corner(RefCorner::TopRight) => resize(cursor.row, area.c1, area.r2, cursor.column),
+        RefZone::Corner(RefCorner::BottomLeft) => {
+            resize(area.r1, cursor.column, cursor.row, area.c2)
+        }
+        RefZone::Corner(RefCorner::BottomRight) => {
+            resize(area.r1, area.c1, cursor.row, cursor.column)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn address(row: i32, column: i32) -> CellAddress {
+        CellAddress {
+            sheet: 3,
+            row,
+            column,
+        }
+    }
+
+    #[test]
+    fn body_drag_keeps_range_size_and_tracks_the_grabbed_cell() {
+        assert_eq!(
+            dragged_ref_range(
+                SheetRange::new(3, 4, 4, 6, 6),
+                RefZone::Body,
+                address(5, 5),
+                address(7, 9),
+            ),
+            SheetRange::new(3, 6, 8, 8, 10),
+        );
+    }
+
+    #[test]
+    fn edge_and_corner_drags_resize_only_the_selected_sides() {
+        let anchor = SheetRange::new(3, 4, 4, 6, 6);
+        assert_eq!(
+            dragged_ref_range(
+                anchor,
+                RefZone::Edge(Side::Top),
+                address(4, 4),
+                address(2, 4),
+            ),
+            SheetRange::new(3, 2, 4, 6, 6),
+        );
+        assert_eq!(
+            dragged_ref_range(
+                anchor,
+                RefZone::Corner(RefCorner::BottomRight),
+                address(6, 6),
+                address(8, 9),
+            ),
+            SheetRange::new(3, 4, 4, 8, 9),
+        );
     }
 }

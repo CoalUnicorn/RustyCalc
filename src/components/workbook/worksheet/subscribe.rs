@@ -1,8 +1,9 @@
-//! Event-category -> IronCanvas dispatch decision.
+//! Event-category -> scene render dispatch decision.
 //!
 //! Reactive subscription Effect that tracks event signals and overlay
-//! changes. Does NOT render — only pokes the demand-driven render loop
-//! (`use_one_shot_raf`) so it can do the draw on the next animation frame.
+//! changes. Does NOT render — it publishes the overlay payload and bumps the
+//! render revision, then pokes the demand-driven render loop
+//! (`use_one_shot_raf`) so it can draw on the next animation frame.
 //!
 //! Decoupling subscription from rendering is the key to smooth navigation:
 //! holding an arrow key fires ~30 keydown events per second, each emitting
@@ -19,133 +20,56 @@
 
 use leptos::prelude::*;
 
-use crate::coord::SheetRange;
-use crate::events::ContentEvent;
-use crate::input::mouse::CanvasHandle;
 use crate::state::WorkbookState;
-use iron_canvas_core::*;
-
-use super::ClipboardDraw;
-use super::overlay_memo::OverlayTuple;
-
-#[cfg(test)]
-#[path = "subscribe_tests.rs"]
-mod tests;
+use iron_canvas::OverlayState;
 
 pub(super) fn install_subscribe_effect(
     state: WorkbookState,
-    canvas_handle: CanvasHandle,
     theme_dirty: StoredValue<bool>,
-    reactive_overlay: Memo<OverlayTuple>,
-    clipboard_draw: ClipboardDraw,
+    reactive_overlay: Memo<OverlayState>,
     poke: impl Fn() + Clone + 'static,
 ) {
-    Effect::new(move |prev: Option<OverlayTuple>| {
-        let content_events = state.events.content.get();
-        let has_content = !content_events.is_empty();
+    Effect::new(move |prev: Option<OverlayState>| {
+        let has_content = !state.events.content.get().is_empty();
         let has_structure = !state.events.structure.get().is_empty();
         let has_format = !state.events.format.get().is_empty();
         let has_nav = !state.events.navigation.get().is_empty();
         let has_theme = !state.events.theme.get().is_empty();
         let overlay = reactive_overlay.get();
-        let overlay_changed = prev.is_some_and(|p| p != overlay);
+        // The first run must publish the initial overlay (selection, active
+        // cell) even though no event has fired yet, so the very first frame
+        // shows the current selection rather than an empty one.
+        let first = prev.is_none();
+        let overlay_changed = prev.as_ref().is_some_and(|previous| previous != &overlay);
 
-        if !(has_content || has_structure || has_format || has_nav || has_theme || overlay_changed)
+        if !(first
+            || has_content
+            || has_structure
+            || has_format
+            || has_nav
+            || has_theme
+            || overlay_changed)
         {
             return overlay;
         }
-        poke();
-
-        // Push the same state into the IronCanvas orchestrator. Each setter
-        // value-compares, so redundant pushes (e.g. format-only events not
-        // touching theme) flip dirty only on the layers that actually need it.
-        // Dirty routing is then explicit per event class (below): structure and
-        // format request a full repaint (they can move slot geometry); content
-        // takes the row-damage fast path where the event names its rows,
-        // raising the overlay bit only when a nav event co-fires
-        // (commit+Enter); nav-only repaints just the overlay.
-        let OverlayTuple {
-            extend_to,
-            point_range,
-            formula_refs,
-        } = overlay.clone();
-        let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|acb| SheetRange {
-                sheet: acb.sheet,
-                area: acb.range,
-            })
-        });
-        let overlays = RenderOverlays {
-            extend_to,
-            clipboard: clipboard.map(Into::into),
-            point_range: point_range.map(Into::into),
-            formula_refs: formula_refs.into_iter().map(Into::into).collect(),
-        };
         if has_theme {
             theme_dirty.set_value(true);
         }
-        // The current link/merge metadata epoch. Content, format, structure,
-        // and theme events advance it; navigation does not. Pushed every tick
-        // so a purely visual repaint keeps the last value and the canvas can
-        // reuse its validated link/merge snapshot instead of rebuilding it.
-        let metadata_epoch = state.events.metadata_seq.get_value();
-        canvas_handle.update_value(|slot| {
-            if let Some(ic) = slot.as_mut() {
-                ic.set_metadata_epoch(Some(metadata_epoch));
-                ic.set_overlays(overlays);
-                // Each category below is independent, not an if/else-if
-                // cascade: a structure resize, a content edit, and a nav
-                // batch can all land in the same event-bus tick (commit-Enter
-                // fires content + nav together), and every category that
-                // fired must reach the orchestrator truthfully rather than
-                // one suppressing the others.
-                //
-                // Format events include row/col resize (LayoutChanged) —
-                // those mutate slot pixel geometry and must drop last_frame,
-                // so they route through requestRepaint. Row-addressed content
-                // edits feed markRowsDamaged (DamagedRows strategy: one row band
-                // fetched + repainted); un-rowed events fall back to
-                // markContentDirty, which poisons the batch to the pane-mask
-                // path inside the engine — conservative, never wrong. Nav
-                // raises view_changed, which marks view plus overlay
-                // atomically — needed standalone for pure navigation, and
-                // needed alongside content for commit-then-move (Enter/Tab),
-                // where content raise alone never touches the view/overlay
-                // bits.
-                // `has_structure` covers every structural change, including
-                // `StructureEvent::MergedCellsChanged`: a merge-list change
-                // moves grid geometry, so it must rebuild, exactly like a
-                // resize. `request_repaint` marks that geometry work and
-                // deliberately keeps the committed frame: the next attempt
-                // routes through FullRebuild and replaces it, so query geometry
-                // stays coherent with the pixels until that paint lands.
-                if has_structure || has_format {
-                    ic.request_repaint();
-                }
-                if has_content {
-                    for event in &content_events {
-                        match event {
-                            ContentEvent::CellChanged { address, .. } => {
-                                ic.mark_rows_damaged(address.sheet, address.row, address.row);
-                            }
-                            ContentEvent::RangeChanged { sheet_area } => {
-                                ic.mark_rows_damaged(
-                                    sheet_area.sheet,
-                                    sheet_area.area.r1,
-                                    sheet_area.area.r2,
-                                );
-                            }
-                            ContentEvent::FormulaChanged { .. }
-                            | ContentEvent::CalculationUpdated { .. }
-                            | ContentEvent::NamedRangesChanged => ic.mark_content_dirty(),
-                        }
-                    }
-                }
-                if has_nav {
-                    ic.view_changed();
-                }
-            }
-        });
+        // Publish the paint payload every time; the rAF loop stamps it into the
+        // next request. Only *content-class* events advance the revision: the
+        // session re-prepares when the revision moves, so a content edit must
+        // move it, while a nav/overlay change is already distinguished by the
+        // request's viewport/overlays and reuses prepared content (M3's
+        // overlay-only path). A theme change is distinguished by the request
+        // theme. Matches the legacy dirty routing (content = row damage,
+        // structure/format = full repaint, nav = overlay-only).
+        state.overlays.set(overlay.clone());
+        if has_content || has_structure || has_format {
+            state
+                .render_revision
+                .update(|revision| *revision = revision.wrapping_add(1));
+        }
+        poke();
 
         overlay
     });
