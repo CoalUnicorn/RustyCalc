@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use ironcalc_base::expressions::parser::stringify::to_rc_format;
 use ironcalc_base::expressions::types::CellReferenceRC;
 
 use crate::model::ArrowKey;
@@ -154,7 +155,7 @@ fn refnode_rc_format_absolute_is_r1c1() {
             column: true,
         },
     );
-    assert_eq!(n.to_rc(), "R1C1");
+    assert_eq!(to_rc_format(&n.inner), "R1C1");
 }
 
 // Relative ref: stored fields are deltas; area() must add editing coords.

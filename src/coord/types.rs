@@ -5,7 +5,7 @@
 
 use ironcalc_base::UserModel;
 use ironcalc_base::expressions::parser::Node;
-use ironcalc_base::expressions::parser::stringify::{to_localized_string, to_rc_format};
+use ironcalc_base::expressions::parser::stringify::to_localized_string;
 use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
@@ -147,10 +147,6 @@ impl RefNode {
         let language =
             get_language("en").unwrap_or_else(|_| panic!("builtin 'en' language missing"));
         to_localized_string(&self.inner, ctx, locale, language)
-    }
-
-    pub fn to_rc(&self) -> String {
-        to_rc_format(&self.inner)
     }
 
     /// Rewrite the referenced coordinates and keep the original `$` flags and

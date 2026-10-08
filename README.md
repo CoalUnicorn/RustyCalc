@@ -6,23 +6,23 @@
 ![Demo screenshot](assets/demo_mortgage.png)
 
 
-Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc), an Excel-compatible Rust engine vendored in `IronCalc/`. The grid is drawn by the in-tree [`iron-canvas`](iron-canvas/README.md) workspace: a read-only renderer with separate grid and overlay canvases. UI chrome, panels, and workbook state are [Leptos](https://leptos.dev/) in CSR mode.
+RustyCalc is an alpha spreadsheet for web browsers. It compiles to WebAssembly. It uses [IronCalc](https://github.com/ironcalc/IronCalc) for workbook data, formulas, and `.xlsx` files. It uses [`iron-canvas`](https://github.com/CoalUnicorn/iron-canvas) to draw the grid. `iron-canvas` is a separate repository that Cargo expects next to RustyCalc. The user interface uses [Leptos](https://leptos.dev/) 0.8 in client-side rendering mode.
 
 **Status:** prototype. Editing, formulas, formatting, multi-sheet workbooks, named ranges, conditional formatting, camera snapshots, `.xlsx` import/export, and local persistence work. No charts, pivot tables, or collaborative editing.
 
 
 ## What works
 
-- Cell editing with formula support (IronCalc parses and evaluates); multi-line cells (Alt+Enter) and CSE array formulas (Ctrl+Shift+Enter)
-- `iron-canvas` renderer: frozen panes, selection, autofill drag, marching ants, grid lines, auto-fit row heights, error-cell formatting, conditional formatting (data bars, icon sets, color scales)
-- Formula bar and in-cell editor with point-mode editing and colored formula-reference overlays for cell, range, and cross-sheet references; **F4** cycles absolute/relative `$`-flags on the ref under the caret (`A1` → `$A$1` → `A$1` → `$A1`)
-- Draggable formula refs: each cell/range token in an edited formula paints an outlined handle in the canvas; drag the body to move, the edges to resize one axis, the corners to resize both. The formula text rewrites on mouseup.
-- Named ranges and conditional formatting, with CRUD in non-modal right-side drawers and grid range-picking
+- Cell editing with formula support. IronCalc parses and evaluates formulas. Use Alt+Enter for a multi-line cell and Ctrl+Shift+Enter for an array formula.
+- `iron-canvas` renderer: frozen panes, selection, autofill, animated copy border, grid lines, automatic row height, error cell styles, and conditional formatting (data bars, icon sets, color scales)
+- Formula bar and in-cell editor with point-mode editing. Colored overlays mark cell, range, and cross-sheet references. Press **F4** to cycle the `$` flags on the reference at the caret (`A1` → `$A$1` → `A$1` → `$A1`).
+- Drag a formula reference in the canvas to move it. Drag an edge or corner to resize a range. RustyCalc updates the formula when you release the mouse.
+- Create, edit, and remove named ranges and conditional-formatting rules in side panels. Select a range from the grid.
 - Toolbar with tabbed sections (Home / Data / View / File) and an overflow `⋯` menu when space is tight:
   - Home: undo/redo; number format (percent, increase/decrease decimals); font family, size (−/+), bold, italic, underline, strikethrough; text & background color; cell borders; horizontal/vertical alignment, text wrap, merge
   - Data: named ranges; conditional formatting
-  - View: freeze panes; row/column header visibility; gridline visibility; camera snapshots of selected ranges
-  - File: `.xlsx` import / export
+  - View: freeze panes; row and column header visibility; gridline visibility
+  - File: `.xlsx` import and export; SVG and PDF exports of the visible sheet
 
 - Sheet tab bar: add, rename, delete, hide/unhide, tab colors, context menus
 - Right-click context menus on column and row headers (size, insert, delete, move, freeze)
@@ -32,22 +32,22 @@ Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation 
 - Light / dark theme with `localStorage` persistence; canvas reads `--palette-*` from CSS
 - Event-driven auto-save to `localStorage` (1 s debounce, 5 s maximum wait; immediate save on workbook switch)
 - Sidebar workbook list with groups; double-click to rename
-- Developer-only SVG and PDF export of the current sheet (`--features dev-tools`)
-- Share URLs with verification (word-hash consent gate for untrusted payloads)
-- Canvas recording and replay (`.icr` format) via dev-tools feature flag
+- Share links, with an optional verification word
 - Optional Tauri desktop shell, GitHub Pages deployment
 
 ## Build
 
-IronCalc is vendored as a git submodule. Clone with `--recurse-submodules`:
+RustyCalc uses IronCalc as a Git submodule. It also uses the separate `iron-canvas` repository. Clone both repositories into the same parent directory:
 
-```
+```sh
 git clone --recurse-submodules https://github.com/CoalUnicorn/RustyCalc.git
+git clone https://github.com/CoalUnicorn/iron-canvas.git
+cd RustyCalc
 ```
 
-If you already cloned without it, run `git submodule update --init`.
+If you already cloned RustyCalc, run `git submodule update --init` from its directory. From RustyCalc's parent directory, clone `iron-canvas` beside it if no checkout exists there. The RustyCalc manifest uses the relative path `../iron-canvas`.
 
-Requires [Trunk](https://trunkrs.dev/) and the `wasm32-unknown-unknown` target.
+Install the `wasm32-unknown-unknown` target, [Trunk](https://trunkrs.dev/), and `wasm-pack`:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -56,38 +56,19 @@ cargo install wasm-pack
 
 trunk serve                              # dev server at localhost:8080/RustyCalc/
 trunk build --release                    # production build to dist/
-cargo tauri dev                          # optional desktop shell
 cargo check --target wasm32-unknown-unknown
 wasm-pack test --headless --firefox      # browser tests for the top-level crate
-cd iron-canvas && cargo test --workspace # native renderer tests
+cd ../iron-canvas && cargo test --workspace # native renderer tests
 ```
 
-CI (`.github/workflows/rustycalc.yml`) runs `cargo fmt`, `clippy`, and `check` on `wasm32-unknown-unknown`; browser tests are runnable locally but not yet wired into that workflow. The `iron-canvas` workspace has its own native test suite.
+CI (`.github/workflows/rustycalc.yml`) runs `cargo fmt --check`, `cargo clippy`, and `cargo check` for `wasm32-unknown-unknown`. Browser tests run locally but are not part of that workflow. Install Firefox to run the browser test command. The `iron-canvas` repository has its own native test suite.
 
-### Dev tools
-
-```
-trunk serve --features dev-tools
-```
-
-The `dev-tools` feature propagates to `iron-canvas-web/dev-tools`, which pulls in the `iron-canvas-recorder` crate and enables:
-
-- Perf panel in the status bar with per-frame `commit_start → input_done → eval_done → render_done` timings.
-- Canvas recording controls to start/stop capture of painter ops into an `.icr` (JSON) file you can save and replay.
-- SVG and PDF download controls for the current sheet. PDF support is enabled through the internal `export` feature.
-
-Replay a saved `.icr` by opening [`iron-canvas/web-test/recording-viewer.html`](iron-canvas/web-test/recording-viewer.html) and drag-dropping the file. See [`iron-canvas/web-test/README.md`](iron-canvas/web-test/README.md) for the standalone harness and viewer build instructions.
-
-Without the feature flag, the recorder and its optional serialization dependency are not compiled into the wasm bundle, and the production build pays no recording cost.
-
-### Model binding
-
-The app binds the worksheet through the Rust `CanvasModel` adapter (`WorksheetModelAdapter`), so it declares `iron-canvas-web` with `default-features = false` and compiles without the crate's `js-model` feature. That feature carries the JS `setModel` bridge and its IronCalc conversion dependencies, which the app never calls. The JS package and the browser harness keep it on by default.
+For the optional Tauri shell, install the [Tauri CLI](https://tauri.app/start/) and the required system packages, then run `cargo tauri dev`.
 
 ## Docs
 
-- [iron-canvas/README.md](iron-canvas/README.md): renderer architecture entry point (ownership, render-attempt lifecycle, five paint strategies, crate boundaries)
-- [iron-canvas/web-test/README.md](iron-canvas/web-test/README.md): standalone smoke harness and `.icr` recording viewer
+- [iron-canvas README](https://github.com/CoalUnicorn/iron-canvas/blob/main/README.md): renderer overview and architecture
+- [iron-canvas web-test guide](https://github.com/CoalUnicorn/iron-canvas/blob/main/web-test/README.md): standalone browser harness and recording viewer
 - [docs/state-and-events.md](docs/state-and-events.md): `WorkbookState`, `EventBus`
 - [docs/leptos-patterns.md](docs/leptos-patterns.md): Leptos conventions
 - [docs/building-components.md](docs/building-components.md): components
@@ -101,18 +82,10 @@ The app binds the worksheet through the Rust `CanvasModel` adapter (`WorksheetMo
 ## Dependencies
 
 - [IronCalc](https://github.com/ironcalc/IronCalc): engine (formula parsing, evaluation, OOXML)
-- `iron-canvas` (in-tree): `<canvas>` grid renderer
+- [iron-canvas](https://github.com/CoalUnicorn/iron-canvas): Rust grid renderer, checked out next to this repository
 - [Leptos](https://leptos.dev/) 0.8, [leptos-use](https://leptos-use.rs/) 0.19: reactive UI + browser hooks
 - [Trunk](https://trunkrs.dev/): WASM build; [Tauri](https://tauri.app/) 2.x: optional desktop shell
 
-# License
+## License
 
 Licensed under either [MIT](https://opensource.org/licenses/MIT) or [Apache-2.0](https://opensource.org/licenses/Apache-2.0) at your option.
-
-# Why
-
-  - Mental health
-  - I love and hate spreadsheets
-  - I was the spreadsheet / "IT guy" in the office
-  - I always dreamed of creating my own version
-  - All in Rust? I like the language and tooling - learning exercise
