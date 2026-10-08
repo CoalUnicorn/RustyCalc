@@ -22,6 +22,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  IRON_CANVAS_REF: b898b430d5251982079374bbd2f1a854caada60b
 
 jobs:
   build:
@@ -38,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CoalUnicorn/iron-canvas
-          ref: main
+          ref: ${{ env.IRON_CANVAS_REF }}
           path: iron-canvas
 
       # The gitlink must point at an IronCalc commit carrying the wasm zip
