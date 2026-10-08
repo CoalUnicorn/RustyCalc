@@ -63,7 +63,7 @@ pub fn LinkButton() -> impl IntoView {
     let trigger_click = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
         if !open.get_untracked() {
-            let seed = read_seed(model, canvas_handle);
+            let seed = read_seed(model, state, canvas_handle);
             set_kind.set(seed.kind);
             target.set(seed.target);
             tooltip.set(seed.tooltip);
@@ -204,14 +204,15 @@ pub fn LinkButton() -> impl IntoView {
 /// Read the active cell's link plus its label. Only static links live in the
 /// worksheet's link map; a dynamic one is reported by the committed canvas
 /// state instead, and switches the form to read-only.
-fn read_seed(model: ModelStore, canvas_handle: CanvasHandle) -> LinkSeed {
+fn read_seed(model: ModelStore, state: WorkbookState, canvas_handle: CanvasHandle) -> LinkSeed {
     let (address, single_cell) = model.with_value(|m| {
         (
             CellAddress::from_view(m),
             CellArea::from_view(m).is_single_cell(),
         )
     });
-    let dynamic = committed_link_is_dynamic(canvas_handle, address.row, address.column);
+    let dynamic =
+        committed_link_is_dynamic(canvas_handle, model, state, address.row, address.column);
     let stored = model.with_value(|m| {
         m.get_cell_link(address.sheet, address.row, address.column)
             .ok()

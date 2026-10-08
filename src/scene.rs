@@ -19,12 +19,21 @@ use iron_canvas_ironcalc::autofit::AutoFitError;
 use ironcalc_base::{UserModel, links::CellLinkView};
 use web_sys::HtmlCanvasElement;
 
+use crate::coord::CellArea;
+
 /// Owns the scene session and its Canvas2D backend. Size and scale are fixed
 /// per instance; a resize rebuilds both.
 pub struct SceneHandle {
     session: CanvasSession<Canvas2dSceneBackend>,
     size: CanvasSize,
     scale: f64,
+    committed_context: Option<SceneContext>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SceneContext {
+    workbook_id: u64,
+    sheet: u32,
 }
 
 impl SceneHandle {
@@ -35,6 +44,7 @@ impl SceneHandle {
             session: CanvasSession::new(backend),
             size,
             scale,
+            committed_context: None,
         })
     }
 
@@ -58,9 +68,17 @@ impl SceneHandle {
         workbook: &UserModel<'_>,
         request: &RenderRequest,
     ) -> Result<RenderOutcome, String> {
-        self.session
-            .render(workbook, request)
-            .map_err(|e| format!("{e:?}"))
+        const TIMER_LABEL: &str = "rustycalc renderer";
+        web_sys::console::time_with_label(TIMER_LABEL);
+        let result = self.session.render(workbook, request);
+        if result.is_ok() {
+            self.committed_context = Some(SceneContext {
+                workbook_id: request.revision.workbook_id,
+                sheet: request.sheet,
+            });
+        }
+        web_sys::console::time_end_with_label(TIMER_LABEL);
+        result.map_err(|e| format!("{e:?}"))
     }
 
     /// Drop backend metric caches after a font change.
@@ -118,10 +136,9 @@ impl SceneHandle {
         self.session.autofill_handle_rect(range)
     }
 
-    /// The origin the committed frame actually scrolled to, after freeze
-    /// clamping. `None` before the first successful commit.
-    pub fn scroll_origin(&self) -> Option<CellCoord> {
-        self.session.scroll_origin()
+    /// Whether committed geometry belongs to the live worksheet and workbook.
+    pub(crate) fn matches_context(&self, sheet: u32, workbook_id: u64) -> bool {
+        self.committed_context == Some(SceneContext { workbook_id, sheet })
     }
 
     /// Minimal origin that brings `(row, column)` fully inside the committed
@@ -129,9 +146,14 @@ impl SceneHandle {
     pub fn scroll_to_show(
         &self,
         workbook: &UserModel<'_>,
+        sheet: u32,
+        workbook_id: u64,
         row: i32,
         column: i32,
     ) -> Option<(i32, i32)> {
+        if !self.matches_context(sheet, workbook_id) {
+            return None;
+        }
         self.session.scroll_to_show(workbook, row, column)
     }
 
@@ -156,6 +178,28 @@ impl SceneHandle {
         self.session
             .fit_row_height(workbook, row, first_col, last_col)
     }
+}
+
+/// Clamp a live requested origin so the first scrollable row and column do
+/// not overlap their frozen bands.
+pub(crate) fn clamp_viewport_origin(
+    origin: CellCoord,
+    frozen_rows: i32,
+    frozen_columns: i32,
+) -> CellCoord {
+    CellCoord {
+        row: origin.row.max(frozen_rows.saturating_add(1)),
+        col: origin.col.max(frozen_columns.saturating_add(1)),
+    }
+}
+
+/// Keep a copied range on its source sheet when building a worksheet overlay.
+pub(crate) fn clipboard_range_on_sheet(
+    clipboard_sheet: u32,
+    range: CellArea,
+    requested_sheet: u32,
+) -> Option<GridRange> {
+    (clipboard_sheet == requested_sheet).then(|| range.into())
 }
 
 /// Build a render request for one worksheet frame at a canvas size.

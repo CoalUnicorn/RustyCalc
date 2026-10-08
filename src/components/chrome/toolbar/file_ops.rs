@@ -4,7 +4,7 @@
 use std::io::Cursor;
 
 use iron_canvas::{CanvasSession, RenderRequest, RevisionToken};
-use iron_canvas_core::{CanvasTheme, CellCoord, scene_geometry::GridRange};
+use iron_canvas_core::{CanvasTheme, CellCoord};
 #[cfg(feature = "export")]
 use iron_canvas_export::PdfSceneBackend;
 use iron_canvas_export::SvgSceneBackend;
@@ -19,7 +19,7 @@ use crate::input::mouse::CanvasHandle;
 use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::input::xlsx_io;
 use crate::model::AppClipboard;
-use crate::scene::request_for;
+use crate::scene::{clipboard_range_on_sheet, request_for};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 
 use super::icon::{FileIcon, Icon};
@@ -98,7 +98,7 @@ fn export_request(
     overlays.clipboard = clipboard.with_value(|clipboard| {
         clipboard
             .as_ref()
-            .map(|clipboard| GridRange::from(clipboard.range))
+            .and_then(|clipboard| clipboard_range_on_sheet(clipboard.sheet, clipboard.range, sheet))
     });
     Ok(request_for(
         sheet,

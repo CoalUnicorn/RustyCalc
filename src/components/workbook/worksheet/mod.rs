@@ -117,8 +117,8 @@ pub fn Worksheet() -> impl IntoView {
     // signal that fires once per workbook switch. The model store now holds the
     // new workbook, so the render loop would read it on the next poke; bumping
     // the revision here forces the scene session to re-prepare rather than
-    // reuse the outgoing workbook's frame (the rAF loop also rolls the
-    // workbook generation on a uuid change).
+    // reuse the outgoing workbook's frame. Activation advances the workbook
+    // generation so committed geometry also rejects the outgoing frame.
     {
         let current_uuid = state.current_uuid.read();
         let poke = poke.clone();

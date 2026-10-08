@@ -20,7 +20,7 @@ use wasm_bindgen::JsCast;
 
 use crate::components::workbook::editing::formula_overlay::FormulaOverlay;
 use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-use crate::input::mouse::CanvasHandle;
+use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::model::SheetRoster;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::scene::SceneHandle;
@@ -140,12 +140,11 @@ pub fn FormulaTextArea() -> impl IntoView {
                 let view = model.with_value(|m| m.get_selected_view());
                 (view.sheet, view.row, view.column)
             });
-        let rect = canvas_handle
-            .with_value(|slot| {
-                slot.as_ref()
-                    .and_then(|ic| editor_rect(ic, &model, sheet, row, column))
-            })
-            .unwrap_or(PixelRect::default());
+        let rect = with_canvas(canvas_handle, model, state, |handle| {
+            editor_rect(handle, &model, sheet, row, column)
+        })
+        .flatten()
+        .unwrap_or(PixelRect::default());
         format!("{}", rect)
     };
 

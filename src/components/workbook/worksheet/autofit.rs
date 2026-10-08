@@ -18,7 +18,7 @@ use leptos::prelude::*;
 use crate::coord::DEFAULT_ROW_HEIGHT;
 use crate::events::ContentEvent;
 use crate::input::keyboard::{SpreadsheetAction, execute};
-use crate::input::mouse::CanvasHandle;
+use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::input::structure::StructAction;
 use crate::model::ActiveCellQuery;
 use crate::state::{ModelStore, WorkbookState};
@@ -63,10 +63,10 @@ pub(super) fn install_autofit_effect(
             // A failed measurement (no model, unreadable sheet or column
             // extent) is not "no content": leave that row at its height.
             let fitted = model.with_value(|m| {
-                canvas_handle.with_value(|slot| {
-                    slot.as_ref()
-                        .and_then(|handle| handle.fit_row_height(m, row, dim.c1, dim.c2).ok())
+                with_canvas(canvas_handle, model, state, |handle| {
+                    handle.fit_row_height(m, row, dim.c1, dim.c2).ok()
                 })
+                .flatten()
             });
             let Some(Some(fitted)) = fitted else {
                 continue;

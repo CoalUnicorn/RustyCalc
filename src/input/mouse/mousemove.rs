@@ -87,7 +87,7 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
             // The scroll mutation above won't be reflected on canvas until the
             // next render, so hit_test against the committed frame matches
             // what the user still sees.
-            if let Some(GridHit::Cell(coord)) = with_canvas(icv, |h| {
+            if let Some(GridHit::Cell(coord)) = with_canvas(icv, model, state, |h| {
                 h.hit_test(iron_canvas_core::Point {
                     x: mx as i32,
                     y: my as i32,
@@ -274,7 +274,7 @@ pub fn handle_mousemove(
     // corner, autofill handle, off-canvas) means the drag-target sits outside
     // the scrollable grid — bail and let the autoscroll timer (if any)
     // continue to advance the viewport on its own cadence.
-    let Some(GridHit::Cell(coord)) = with_canvas(icv, |h| {
+    let Some(GridHit::Cell(coord)) = with_canvas(icv, model, state, |h| {
         h.hit_test(iron_canvas_core::Point {
             x: x as i32,
             y: y as i32,
@@ -287,7 +287,7 @@ pub fn handle_mousemove(
 
     // `None` until the first paint (no frame, so no pane geometry) — the drag
     // state below still updates, only the edge-scroll is skipped.
-    let pane = with_canvas(icv, |h| h.scroll_pane_rect()).flatten();
+    let pane = with_canvas(icv, model, state, |h| h.scroll_pane_rect()).flatten();
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {

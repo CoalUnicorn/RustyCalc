@@ -17,6 +17,7 @@
 use leptos::prelude::*;
 
 use crate::scene::SceneHandle;
+use crate::state::{ModelStore, WorkbookState};
 
 mod autofill;
 mod click;
@@ -47,6 +48,21 @@ pub type CanvasHandle = StoredValue<Option<SceneHandle>, LocalStorage>;
 
 /// Read a value from the canvas handle. Returns `None` until both
 /// `<canvas>` elements mount and the lazy rAF construction runs.
-pub(crate) fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&SceneHandle) -> R) -> Option<R> {
-    handle.with_value(|slot| slot.as_ref().map(f))
+pub(crate) fn with_canvas<R>(
+    handle: CanvasHandle,
+    model: ModelStore,
+    state: WorkbookState,
+    f: impl FnOnce(&SceneHandle) -> R,
+) -> Option<R> {
+    let (sheet, workbook_id) = model.with_value(|m| {
+        (
+            m.get_selected_view().sheet,
+            state.workbook_generation.get_value(),
+        )
+    });
+    handle.with_value(|slot| {
+        slot.as_ref()
+            .filter(|scene| scene.matches_context(sheet, workbook_id))
+            .map(f)
+    })
 }

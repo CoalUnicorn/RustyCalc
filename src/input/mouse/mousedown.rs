@@ -39,7 +39,9 @@ pub fn handle_mousedown(
     };
 
     // 1. Resize handle (column or row boundary in its header strip).
-    if let Some(target) = with_canvas(icv, |h| h.resize_target(point, HIT_ZONE)).flatten() {
+    if let Some(target) =
+        with_canvas(icv, model, state, |h| h.resize_target(point, HIT_ZONE)).flatten()
+    {
         let area = model.with_value(|m| CellArea::from_view(m));
         match target {
             GridResize::Column(col) => {
@@ -70,15 +72,17 @@ pub fn handle_mousedown(
         .get_untracked()
         .map(|edit| draggable_ref_indices(edit.formula_analysis.refs()))
         .unwrap_or_default();
-    if let Some(hit) =
-        with_canvas(icv, |h| h.formula_ref_hit_test(point, &draggable_refs)).flatten()
+    if let Some(hit) = with_canvas(icv, model, state, |h| {
+        h.formula_ref_hit_test(point, &draggable_refs)
+    })
+    .flatten()
     {
         handle_formula_ref_mousedown(&ev, hit, state);
         return;
     }
 
     // 2. Click target.
-    let hit = with_canvas(icv, |h| h.hit_test(point)).flatten();
+    let hit = with_canvas(icv, model, state, |h| h.hit_test(point)).flatten();
     match hit {
         Some(GridHit::Corner) => handle_corner_click(model, state),
         Some(GridHit::ColumnHeader(col)) => handle_col_header_click(&ev, col, model, state),
@@ -87,7 +91,8 @@ pub fn handle_mousedown(
             // The autofill handle is not a hit-test class in the scene
             // geometry: the host derives it from the selection's
             // bottom-right corner square.
-            let near_handle = with_canvas(icv, |h| autofill_hit(h, model, point)).unwrap_or(false);
+            let near_handle =
+                with_canvas(icv, model, state, |h| autofill_hit(h, model, point)).unwrap_or(false);
             if near_handle {
                 handle_cell_click(&ev, coord.row, coord.col, true, model, state);
                 ev.prevent_default();
@@ -98,7 +103,7 @@ pub fn handle_mousedown(
             // only followed from a clean idle mousedown.
             // The logical anchor, not the physical slot: over a merged range
             // the anchor owns the link and is the address the browser opens.
-            let link_anchor = with_canvas(icv, |h| {
+            let link_anchor = with_canvas(icv, model, state, |h| {
                 h.display_cell_at(point)
                     .and_then(|cell| cell.link.map(|_| (cell.anchor.row, cell.anchor.col)))
             })

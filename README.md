@@ -8,7 +8,7 @@
 
 RustyCalc is an alpha spreadsheet for web browsers. It compiles to WebAssembly. It uses [IronCalc](https://github.com/ironcalc/IronCalc) for workbook data, formulas, and `.xlsx` files. It uses [`iron-canvas`](https://github.com/CoalUnicorn/iron-canvas) to draw the grid. `iron-canvas` is a separate repository that Cargo expects next to RustyCalc. The user interface uses [Leptos](https://leptos.dev/) 0.8 in client-side rendering mode.
 
-**Status:** prototype. Editing, formulas, formatting, multi-sheet workbooks, named ranges, conditional formatting, camera snapshots, `.xlsx` import/export, and local persistence work. No charts, pivot tables, or collaborative editing.
+**Status:** prototype. Editing, formulas, formatting, multi-sheet workbooks, named ranges, conditional formatting, `.xlsx` import/export, and local persistence work. No charts, pivot tables, or collaborative editing.
 
 
 ## What works
@@ -21,7 +21,7 @@ RustyCalc is an alpha spreadsheet for web browsers. It compiles to WebAssembly. 
 - Toolbar with tabbed sections (Home / Data / View / File) and an overflow `⋯` menu when space is tight:
   - Home: undo/redo; number format (percent, increase/decrease decimals); font family, size (−/+), bold, italic, underline, strikethrough; text & background color; cell borders; horizontal/vertical alignment, text wrap, merge
   - Data: named ranges; conditional formatting
-  - View: freeze panes; row and column header visibility; gridline visibility
+  - View: freeze panes; gridline visibility
   - File: `.xlsx` import and export; SVG and PDF exports of the visible sheet
 
 - Sheet tab bar: add, rename, delete, hide/unhide, tab colors, context menus

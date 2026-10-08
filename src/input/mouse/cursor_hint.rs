@@ -63,6 +63,7 @@ pub(super) fn autofill_hit(handle: &SceneHandle, model: ModelStore, point: Point
 pub(super) fn compute_cursor_hint(
     icv: CanvasHandle,
     model: ModelStore,
+    state: WorkbookState,
     x: f64,
     y: f64,
     draggable_refs: &[usize],
@@ -71,19 +72,24 @@ pub(super) fn compute_cursor_hint(
         x: x as i32,
         y: y as i32,
     };
-    if let Some(target) = with_canvas(icv, |h| h.resize_target(point, HIT_ZONE)).flatten() {
+    if let Some(target) =
+        with_canvas(icv, model, state, |h| h.resize_target(point, HIT_ZONE)).flatten()
+    {
         return HoverHint::plain(match target {
             GridResize::Column(_) => CursorHint::ColResize,
             GridResize::Row(_) => CursorHint::RowResize,
         });
     }
-    if let Some(hit) = with_canvas(icv, |h| h.formula_ref_hit_test(point, draggable_refs)).flatten()
+    if let Some(hit) = with_canvas(icv, model, state, |h| {
+        h.formula_ref_hit_test(point, draggable_refs)
+    })
+    .flatten()
     {
         return HoverHint::plain(ref_zone_hint(hit.zone));
     }
-    match with_canvas(icv, |h| h.hit_test(point)).flatten() {
+    match with_canvas(icv, model, state, |h| h.hit_test(point)).flatten() {
         Some(GridHit::Cell(coord)) => {
-            if with_canvas(icv, |h| autofill_hit(h, model, point)).unwrap_or(false) {
+            if with_canvas(icv, model, state, |h| autofill_hit(h, model, point)).unwrap_or(false) {
                 return HoverHint::plain(CursorHint::Autofill);
             }
             // Resolve the *logical* cell: a merged range is one cell whose
@@ -91,7 +97,7 @@ pub(super) fn compute_cursor_hint(
             // a link the user can plainly see under the pointer. The reported
             // cell stays the physical one — the tooltip is positioned against
             // what the pointer is over, and drag/resize keep physical coords.
-            let linked = with_canvas(icv, |h| {
+            let linked = with_canvas(icv, model, state, |h| {
                 h.display_cell_at(point)
                     .is_some_and(|cell| cell.link.is_some())
             })
@@ -142,7 +148,7 @@ pub(crate) fn set_hover_probe(
         .get_untracked()
         .map(|edit| draggable_ref_indices(edit.formula_analysis.refs()))
         .unwrap_or_default();
-    let probe = compute_cursor_hint(icv, model, x, y, &draggable_refs);
+    let probe = compute_cursor_hint(icv, model, state, x, y, &draggable_refs);
     if state.hover_cursor.get_untracked() != probe.cursor {
         state.hover_cursor.set(probe.cursor);
     }

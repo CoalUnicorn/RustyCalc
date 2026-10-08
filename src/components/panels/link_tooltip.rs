@@ -25,6 +25,8 @@ pub(crate) struct HoveredLink {
 /// Resolve the pointer against the committed frame for every tooltip action.
 pub(crate) fn hovered_link(
     canvas: CanvasHandle,
+    model: ModelStore,
+    state: WorkbookState,
     pointer: Option<(f64, f64)>,
 ) -> Option<HoveredLink> {
     let (x, y) = pointer?;
@@ -32,7 +34,7 @@ pub(crate) fn hovered_link(
         x: x as i32,
         y: y as i32,
     };
-    with_canvas(canvas, |h| {
+    with_canvas(canvas, model, state, |h| {
         let cell = h.display_cell_at(point)?;
         let link = cell.link?;
         let text = match &link.link {
@@ -69,7 +71,7 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
         let _ = state.committed_frame.get();
 
         let anchor = state.hover_link.get().and_then(|_| {
-            let cell = hovered_link(canvas_handle, state.hover_pointer.get())?;
+            let cell = hovered_link(canvas_handle, model, state, state.hover_pointer.get())?;
             let canvas_box = grid_ref.get_untracked()?.get_bounding_client_rect();
             Some((cell.rect, canvas_box))
         });
@@ -91,7 +93,7 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
         state
             .hover_link
             .get()
-            .and_then(|_| hovered_link(canvas_handle, state.hover_pointer.get()))
+            .and_then(|_| hovered_link(canvas_handle, model, state, state.hover_pointer.get()))
             .map(|cell| cell.text)
             .unwrap_or_default()
     };

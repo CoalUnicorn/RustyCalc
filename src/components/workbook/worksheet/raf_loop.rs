@@ -19,10 +19,10 @@ use leptos::prelude::*;
 
 use crate::components::workbook::one_shot_raf::use_one_shot_raf;
 use crate::input::mouse::CanvasHandle;
-use crate::scene::{SceneHandle, request_for};
+use crate::scene::{SceneHandle, clamp_viewport_origin, clipboard_range_on_sheet, request_for};
 use crate::state::{ModelStore, WorkbookState};
 use iron_canvas::RevisionToken;
-use iron_canvas_core::{CanvasSize, CanvasTheme, CellCoord, scene_geometry::GridRange};
+use iron_canvas_core::{CanvasSize, CanvasTheme, CellCoord};
 
 use super::ClipboardDraw;
 
@@ -43,10 +43,6 @@ pub(super) fn install_raf_loop(
 ) -> impl Fn() + Clone {
     let last_pane_w = Cell::new(0.0f64);
     let last_pane_h = Cell::new(0.0f64);
-    // Workbook generation: the scene session must not reuse prepared content
-    // across a workbook switch, even when the sheet index and theme match.
-    let workbook_id = Cell::new(0u64);
-    let last_uuid = Cell::new(None::<crate::storage::WorkbookId>);
     let theme_cache: Rc<RefCell<Option<CanvasTheme>>> = Rc::new(RefCell::new(None));
 
     let paint = move || -> bool {
@@ -88,65 +84,76 @@ pub(super) fn install_raf_loop(
             return true; // keep polling until refs mount and layout has measured
         }
 
-        // 2. Bump the workbook generation whenever the model store is swapped.
-        let uuid = state.current_uuid.get_untracked();
-        if last_uuid.get() != uuid {
-            last_uuid.set(uuid);
-            workbook_id.set(workbook_id.get().wrapping_add(1));
-        }
-
-        // 3. View reconciliation — runs before the paint so a correction lands
-        //    on this frame rather than flashing on the next one.
-
-        // Freezing panes never moves `top_row`, so the model can hold an origin
-        // inside the frozen run that no painted pixel agrees with. The renderer
-        // clamps it silently; write the clamp back, because ironcalc's page
-        // navigation derives its *new selection* from `top_row` and would
-        // compute it from the stale value.
-        let (sheet, mut top_row, mut left_col) = model.with_value(|m| {
+        // 2. Clamp the live model origin to its current sheet's frozen bands.
+        //    Never copy the previous frame's origin here: the model can hold a
+        //    newer scroll request, or belong to another sheet or workbook.
+        let (sheet, requested_origin) = model.with_value(|m| {
             let view = m.get_selected_view();
-            (view.sheet, view.top_row, view.left_column)
+            let frozen_rows = m.get_frozen_rows_count(view.sheet).unwrap_or(0);
+            let frozen_columns = m.get_frozen_columns_count(view.sheet).unwrap_or(0);
+            (
+                view.sheet,
+                clamp_viewport_origin(
+                    CellCoord {
+                        row: view.top_row,
+                        col: view.left_column,
+                    },
+                    frozen_rows,
+                    frozen_columns,
+                ),
+            )
         });
-        if let Some(origin) =
-            canvas_handle.with_value(|slot| slot.as_ref().and_then(|h| h.scroll_origin()))
-            && (origin.row, origin.col) != (top_row, left_col)
-        {
+        let (mut top_row, mut left_col) = (requested_origin.row, requested_origin.col);
+        let current_origin = model.with_value(|m| {
+            let view = m.get_selected_view();
+            CellCoord {
+                row: view.top_row,
+                col: view.left_column,
+            }
+        });
+        if requested_origin != current_origin {
             model.update_value(|m| {
-                if let Err(e) = m.set_top_left_visible_cell(origin.row, origin.col) {
-                    web_sys::console::warn_1(&format!("[rustycalc nav] origin sync: {e}").into());
+                if let Err(e) =
+                    m.set_top_left_visible_cell(requested_origin.row, requested_origin.col)
+                {
+                    web_sys::console::warn_1(&format!("[rustycalc nav] origin clamp: {e}").into());
                 }
             });
-            top_row = origin.row;
-            left_col = origin.col;
         }
+        let workbook_id = state.workbook_generation.get_value();
 
         // A navigation asked for the active cell to be brought into view. Only
         // the renderer can say whether it already fits — it alone knows the
         // pane extent, the frozen bands and the partial trailing row.
         if state.scroll_into_view.get_value() {
-            state.scroll_into_view.set_value(false);
             let (row, column) = model.with_value(|m| {
                 let view = m.get_selected_view();
                 (view.row, view.column)
             });
-            let target = model.with_value(|m| {
-                canvas_handle
-                    .with_value(|slot| slot.as_ref().and_then(|h| h.scroll_to_show(m, row, column)))
+            let target = canvas_handle.with_value(|slot| {
+                slot.as_ref()
+                    .filter(|h| h.matches_context(sheet, workbook_id))
+                    .map(|h| {
+                        model.with_value(|m| h.scroll_to_show(m, sheet, workbook_id, row, column))
+                    })
             });
-            if let Some((top, left)) = target {
-                // `scroll_to_show` already returns `None` when the target
-                // matches the current origin, so `Some` names a real,
-                // different origin.
-                model.update_value(|m| match m.set_top_left_visible_cell(top, left) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        web_sys::console::warn_1(
-                            &format!("[rustycalc nav] scroll into view: {e}").into(),
-                        );
-                    }
-                });
-                top_row = top;
-                left_col = left;
+            if let Some(target) = target {
+                state.scroll_into_view.set_value(false);
+                if let Some((top, left)) = target {
+                    // `scroll_to_show` already returns `None` when the target
+                    // matches the current origin, so `Some` names a real,
+                    // different origin.
+                    model.update_value(|m| match m.set_top_left_visible_cell(top, left) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            web_sys::console::warn_1(
+                                &format!("[rustycalc nav] scroll into view: {e}").into(),
+                            );
+                        }
+                    });
+                    top_row = top;
+                    left_col = left;
+                }
             }
         }
 
@@ -170,8 +177,9 @@ pub(super) fn install_raf_loop(
         // 5. Build the frame request from the live selection/overlay state.
         let mut overlays = state.overlays.get_untracked();
         overlays.clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref()
-                .map(|clipboard| GridRange::from(clipboard.range))
+            opt.as_ref().and_then(|clipboard| {
+                clipboard_range_on_sheet(clipboard.sheet, clipboard.range, sheet)
+            })
         });
         let size = canvas_handle
             .with_value(|slot| slot.as_ref().map(|h| h.size()))
@@ -186,7 +194,7 @@ pub(super) fn install_raf_loop(
             theme,
             overlays,
             RevisionToken {
-                workbook_id: workbook_id.get(),
+                workbook_id,
                 revision: state.render_revision.get_untracked(),
             },
         );
@@ -215,8 +223,11 @@ pub(super) fn install_raf_loop(
         //    against when deciding to scroll the active cell into view. The
         //    canvas is the wrong number: the headers and any frozen bands eat
         //    into it.
-        let pane =
-            canvas_handle.with_value(|slot| slot.as_ref().and_then(|h| h.scroll_pane_rect()));
+        let pane = canvas_handle.with_value(|slot| {
+            slot.as_ref()
+                .filter(|h| h.matches_context(sheet, workbook_id))
+                .and_then(|h| h.scroll_pane_rect())
+        });
         if let Some(pane) = pane {
             let pane_w = f64::from(pane.width);
             let pane_h = f64::from(pane.height);
@@ -230,7 +241,9 @@ pub(super) fn install_raf_loop(
             }
         }
 
-        false
+        // Keep polling when a scroll request arrived before this sheet's
+        // geometry committed. The next frame can then use matching geometry.
+        state.scroll_into_view.get_value()
     };
 
     let poke = use_one_shot_raf(paint);

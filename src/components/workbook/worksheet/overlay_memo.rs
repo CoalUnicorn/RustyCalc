@@ -25,6 +25,10 @@ pub(super) fn reactive_overlay(state: WorkbookState, model: ModelStore) -> Memo<
         // Subscribe to the navigation bus so a selection/sheet move re-derives
         // the selection overlay; the model store itself is not reactive.
         let _ = state.events.navigation.get();
+        // Sheet hide/delete can change the selected view without a navigation
+        // event. Model replacement also needs a fresh selection snapshot.
+        let _ = state.events.structure.get();
+        let _ = state.current_uuid.get();
 
         let mut overlays = OverlayState::default();
         let view = model.with_value(|m| m.get_selected_view());

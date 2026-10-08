@@ -56,6 +56,9 @@ pub struct WorkbookState {
     /// selection ranges, active cell, clipboard range and formula references.
     /// The rAF loop reads it when it builds the frame request.
     pub(crate) overlays: Split<OverlayState>,
+    /// Monotonic identity for the active workbook model. Committed canvas
+    /// queries only apply while the frame belongs to this model.
+    pub(crate) workbook_generation: StoredValue<u64, LocalStorage>,
     /// Monotonic revision the render loop stamps into each `RenderRequest`.
     /// Bumped by the subscribe Effect on any event or overlay change; the
     /// scene session compares it to decide whether to re-prepare the frame.
@@ -146,6 +149,7 @@ impl WorkbookState {
             hover_pointer: Split::new(None),
             committed_frame: Split::new(0),
             overlays: Split::new(OverlayState::default()),
+            workbook_generation: StoredValue::new_local(0),
             render_revision: Split::new(0),
             context_menu: Split::new(None),
             status: Split::new(None),
@@ -156,6 +160,12 @@ impl WorkbookState {
             editing_cf_rule: Split::new(None),
             range_capture: Split::new(None),
         }
+    }
+
+    pub(crate) fn advance_workbook_generation(&self) {
+        self.workbook_generation.update_value(|generation| {
+            *generation = generation.wrapping_add(1);
+        });
     }
 
     /// Reset all transient view/edit state to its initial (post-`new`) values.

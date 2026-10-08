@@ -240,6 +240,7 @@ fn tooltip_resolves_a_covered_pointer_to_the_anchor_link_and_fragment() {
     use wasm_bindgen::JsCast;
 
     Owner::new().with(|| {
+        let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
         let document = web_sys::window()
             .expect("window")
             .document()
@@ -280,15 +281,21 @@ fn tooltip_resolves_a_covered_pointer_to_the_anchor_link_and_fragment() {
             CanvasTheme::light(),
             OverlayState::default(),
             RevisionToken {
-                workbook_id: 1,
+                workbook_id: 0,
                 revision: 0,
             },
         );
-        handle.render(&m, &request).expect("render");
+        let model = StoredValue::new_local(m);
+        model.with_value(|model| handle.render(model, &request).expect("render"));
         let point = handle.cell_rect(3, 3).expect("covered cell").center();
         let slot = StoredValue::new_local(Some(handle));
-        let cell = hovered_link(slot, Some((f64::from(point.x), f64::from(point.y))))
-            .expect("logical tooltip");
+        let cell = hovered_link(
+            slot,
+            model,
+            state,
+            Some((f64::from(point.x), f64::from(point.y))),
+        )
+        .expect("logical tooltip");
         // The covered pointer resolves through the merge to the anchor's link
         // (its text) and to the whole merged fragment (its width).
         assert_eq!(cell.text, "destination");

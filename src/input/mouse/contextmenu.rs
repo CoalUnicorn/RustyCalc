@@ -25,7 +25,7 @@ pub fn handle_contextmenu(
         y: ev.offset_y(),
     };
 
-    let target = match with_canvas(icv, |h| h.hit_test(point)).flatten() {
+    let target = match with_canvas(icv, model, state, |h| h.hit_test(point)).flatten() {
         Some(GridHit::ColumnHeader(col)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, col, Axis::Col);

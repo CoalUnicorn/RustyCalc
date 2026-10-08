@@ -225,7 +225,7 @@ pub fn execute_link(
         action,
         area,
         anchor,
-        committed_link_is_dynamic(icv, anchor.row, anchor.column),
+        committed_link_is_dynamic(icv, model, *state, anchor.row, anchor.column),
     )?;
     let old_value = model.with_value(|m| cell_text(m, anchor));
 
@@ -284,7 +284,8 @@ pub fn activate_link(
     icv: CanvasHandle,
     point: Point,
 ) -> Result<(), LinkError> {
-    let Some(link) = with_canvas(icv, |h| h.link_at(point).cloned()).flatten() else {
+    let Some(link) = with_canvas(icv, model, *state, |h| h.link_at(point).cloned()).flatten()
+    else {
         return Ok(());
     };
     match link.link {
@@ -380,8 +381,14 @@ fn navigate_internal(
 /// formula. The scene exposes links by canvas point, so the cell's committed
 /// rect supplies the probe point; a cell that is not in the painted frame has
 /// no committed link to protect.
-pub(crate) fn committed_link_is_dynamic(icv: CanvasHandle, row: i32, column: i32) -> bool {
-    with_canvas(icv, |h| {
+pub(crate) fn committed_link_is_dynamic(
+    icv: CanvasHandle,
+    model: ModelStore,
+    state: WorkbookState,
+    row: i32,
+    column: i32,
+) -> bool {
+    with_canvas(icv, model, state, |h| {
         h.cell_rect(row, column).and_then(|rect| {
             let center = rect.center();
             h.link_at(center).map(|link| link.dynamic)

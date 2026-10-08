@@ -25,7 +25,9 @@ pub fn handle_dblclick(
         y: ev.offset_y(),
     };
 
-    if let Some(target) = with_canvas(icv, |h| h.resize_target(point, HIT_ZONE)).flatten() {
+    if let Some(target) =
+        with_canvas(icv, model, state, |h| h.resize_target(point, HIT_ZONE)).flatten()
+    {
         // Excel-style auto-fit: scan the whole used range (not just the
         // painted viewport), and when the boundary sits inside a full-header
         // multi-selection, fit every selected column/row to its OWN content.
@@ -42,10 +44,10 @@ pub fn handle_dblclick(
                     // column extent) is not "no content": skip that column.
                     let measured = model
                         .with_value(|m| {
-                            icv.with_value(|slot| {
-                                slot.as_ref()
-                                    .and_then(|h| h.fit_column_width(m, c, dim.r1, dim.r2).ok())
+                            with_canvas(icv, model, state, |h| {
+                                h.fit_column_width(m, c, dim.r1, dim.r2).ok()
                             })
+                            .flatten()
                         })
                         .flatten();
                     if let Some(w) = measured {
@@ -68,10 +70,10 @@ pub fn handle_dblclick(
                     // row extent) is not "no content": skip that row.
                     let measured = model
                         .with_value(|m| {
-                            icv.with_value(|slot| {
-                                slot.as_ref()
-                                    .and_then(|h| h.fit_row_height(m, r, dim.c1, dim.c2).ok())
+                            with_canvas(icv, model, state, |h| {
+                                h.fit_row_height(m, r, dim.c1, dim.c2).ok()
                             })
+                            .flatten()
                         })
                         .flatten();
                     if let Some(h) = measured {
@@ -93,10 +95,11 @@ pub fn handle_dblclick(
     }
 
     let cell = matches!(
-        with_canvas(icv, |h| h.hit_test(point)).flatten(),
+        with_canvas(icv, model, state, |h| h.hit_test(point)).flatten(),
         Some(GridHit::Cell(_))
     );
-    let near_handle = with_canvas(icv, |h| autofill_hit(h, model, point)).unwrap_or(false);
+    let near_handle =
+        with_canvas(icv, model, state, |h| autofill_hit(h, model, point)).unwrap_or(false);
     if !(cell || near_handle) {
         return;
     }
