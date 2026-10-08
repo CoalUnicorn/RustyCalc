@@ -22,19 +22,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Native cargo test for the iron-canvas workspace.
-  # The top-level rusty-calc package is Leptos client code and does not
-  # compile on the host target, so we scope tests to iron-canvas/ where
-  # the real unit/integration tests live (core, svg, recorder, web).
+  # Native tests run in the separate iron-canvas repository.
+  # RustyCalc is a wasm client, so its target check runs in feature-hack.
   test-native:
     name: cargo test (iron-canvas, native)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout RustyCalc
+      - name: Checkout iron-canvas
         uses: actions/checkout@v4
         with:
-          path: RustyCalc
-          submodules: recursive
+          repository: CoalUnicorn/iron-canvas
+          ref: main
+          path: iron-canvas
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -42,65 +41,15 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: RustyCalc/iron-canvas
+          workspaces: iron-canvas -> target
 
       - name: cargo test --workspace
-        working-directory: RustyCalc/iron-canvas
+        working-directory: iron-canvas
         run: cargo test --workspace --locked
 
-  # Browser-run wasm-bindgen tests for the two wasm-bindgen facades
-  # (iron-canvas-web, iron-canvas-datagrid-web). These are gated
-  # `#[cfg(target_arch = "wasm32")]` and never run under test-native above.
-  # ubuntu-latest ships Chrome + chromedriver, so no extra browser install.
-  test-wasm-browser:
-    name: cargo test (iron-canvas, wasm/browser)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout RustyCalc
-        uses: actions/checkout@v4
-        with:
-          path: RustyCalc
-          submodules: recursive
-
-      - name: Install Rust toolchain (wasm32)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo registry + target
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: RustyCalc/iron-canvas
-          key: wasm-browser
-
-      # Version must track the wasm-bindgen version pinned in
-      # iron-canvas/Cargo.lock — the test runner and the compiled test
-      # binaries must match exactly or the run fails at the JS glue step.
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.120 --locked
-
-      - name: cargo test --target wasm32-unknown-unknown (browser)
-        working-directory: RustyCalc/iron-canvas
-        env:
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-          CHROMEDRIVER: /usr/bin/chromedriver
-        run: cargo test --target wasm32-unknown-unknown -p iron-canvas-web -p iron-canvas-datagrid-web --locked
-
-      # dev-tools is off by default, so the playback/recording tests need
-      # their own feature-enabled invocation, separate from the step above.
-      - name: cargo test --target wasm32-unknown-unknown (browser, dev-tools playback)
-        working-directory: RustyCalc/iron-canvas
-        env:
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-          CHROMEDRIVER: /usr/bin/chromedriver
-        run: cargo test --target wasm32-unknown-unknown -p iron-canvas-web --features dev-tools --test playback_wasm --locked
-
   # Feature-powerset check via cargo-hack.
-  # Catches feature-wiring bugs like `recorder` -> `dev-tools` renames
-  # where a forwarded feature stops resolving.
   # - host run scopes to iron-canvas/ workspace (rusty-calc is wasm-only)
-  # - wasm run scopes to rusty-calc top-level (exercises the feature
-  #   forwards from rusty-calc into iron-canvas-web)
+  # - wasm run checks the RustyCalc package and its canvas dependencies
   feature-hack:
     name: cargo hack (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -111,13 +60,20 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             cmd: cargo hack --feature-powerset --no-dev-deps check --workspace --manifest-path iron-canvas/Cargo.toml --target x86_64-unknown-linux-gnu
           - target: wasm32-unknown-unknown
-            cmd: cargo hack --feature-powerset --no-dev-deps check --manifest-path Cargo.toml --target wasm32-unknown-unknown
+            cmd: cargo hack --feature-powerset --no-dev-deps check --manifest-path RustyCalc/Cargo.toml --target wasm32-unknown-unknown
     steps:
       - name: Checkout RustyCalc
         uses: actions/checkout@v4
         with:
           path: RustyCalc
           submodules: recursive
+
+      - name: Checkout iron-canvas
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/iron-canvas
+          ref: main
+          path: iron-canvas
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -132,9 +88,10 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: RustyCalc
+          workspaces: |
+            RustyCalc -> target
+            iron-canvas -> target
           key: hack-${{ matrix.target }}
 
       - name: ${{ matrix.cmd }}
-        working-directory: RustyCalc
         run: ${{ matrix.cmd }}

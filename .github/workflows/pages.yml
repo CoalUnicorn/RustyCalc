@@ -40,6 +40,13 @@ jobs:
           path: RustyCalc-dev
           submodules: recursive
 
+      - name: Checkout iron-canvas
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/iron-canvas
+          ref: main
+          path: iron-canvas
+
       # Both trees check out the same gitlink; fail loud if it drifts to an
       # IronCalc commit lacking the wasm zip patch (breaks trunk build).
       - name: Verify IronCalc wasm zip patch present
@@ -60,9 +67,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            iron-canvas/target
             RustyCalc-main/target
             RustyCalc-dev/target
-          key: ${{ runner.os }}-pages-${{ hashFiles('RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
+          key: ${{ runner.os }}-pages-${{ hashFiles('iron-canvas/Cargo.lock', 'RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-pages-
 
       - name: Install Trunk
