@@ -32,8 +32,12 @@ pub fn ShareControls() -> impl IntoView {
         let Some(uuid) = state.current_uuid.get_untracked() else {
             return;
         };
-        storage::promote_from_shared(&uuid);
-        app.bump_registry();
+        crate::input::workbook::execute_workbook(
+            crate::input::workbook::WorkbookAction::Trust(uuid),
+            model,
+            &state,
+            app,
+        );
     };
 
     let (share_open, set_share_open) = signal(false);

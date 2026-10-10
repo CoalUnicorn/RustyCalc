@@ -38,6 +38,7 @@ sha2 = { version = "0.11.0", default-features = false }
 iron-canvas-canvas2d = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas-canvas2d" }
 iron-canvas = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas" }
 iron-canvas-export = { version = "0.1.0-beta.2", path = "../iron-canvas/crates/iron-canvas-export", default-features = false, features = ["svg"] }
+bitcode = "0.6.9"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

@@ -26,6 +26,8 @@ pub struct AppState {
     pub(crate) collapsed_groups: Split<Vec<String>>,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
+    /// Blocks input while a workbook lifecycle operation awaits storage.
+    pub storage_busy: RwSignal<bool>,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
             registry_version: RwSignal::new(0),
+            storage_busy: RwSignal::new(false),
         }
     }
 

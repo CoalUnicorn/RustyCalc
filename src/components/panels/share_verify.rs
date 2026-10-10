@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 use crate::app_state::AppState;
 use crate::components::ui::modal::Modal;
-use crate::events::{SpreadsheetEvent, StructureEvent};
+use crate::input::workbook::{WorkbookAction, run_workbook};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, SharedLoad};
 
@@ -42,20 +42,24 @@ pub fn ShareVerify() -> impl IntoView {
     // current, clear the URL hash, and emit a content event so the canvas
     // repaints.
     let activate_shared = move |loaded: ironcalc_base::UserModel<'static>| {
-        if let Some(prev) = state.current_uuid.get_untracked() {
-            model.with_value(|m| storage::save(&prev, m));
+        if app.storage_busy.get_untracked() {
+            return;
         }
-        let (new_uuid, new_model) =
-            storage::create_new_from(loaded, storage::WorkbookOrigin::ShareLink);
-        model.update_value(|m| *m = new_model);
-        state.advance_workbook_generation();
-        state.current_uuid.set(Some(new_uuid));
-        state.reset_view_state();
-        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
-        app.bump_registry();
-        let _ = window().location().set_hash("");
-        set_pending.set(None);
-        reset_modal();
+        app.storage_busy.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            match run_workbook(WorkbookAction::Share(loaded), model, state, app).await {
+                Ok(()) => {
+                    let _ = window().location().set_hash("");
+                    set_pending.set(None);
+                    reset_modal();
+                }
+                Err(message) => {
+                    error.set(message);
+                    loading.set(false);
+                }
+            }
+            app.storage_busy.set(false);
+        });
     };
 
     let close_modal = move || {

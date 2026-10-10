@@ -29,6 +29,31 @@ mod test;
 use app::App;
 
 fn main() {
-    //console_error_panic_hook::set_once();
-    mount_to_body(|| view! { <App /> })
+    if let Some(body) = document().body() {
+        body.set_text_content(Some("Opening workbooks…"));
+    }
+    wasm_bindgen_futures::spawn_local(async {
+        let initial = async {
+            storage::initialize().await?;
+            match storage::load_selected().await? {
+                Some(initial) => Ok(initial),
+                None => storage::create_new().await,
+            }
+        }
+        .await;
+        if let Some(body) = document().body() {
+            body.set_text_content(None);
+        }
+        match initial {
+            Ok(initial) => mount_to_body(move || view! { <App initial /> }),
+            Err(error) => mount_to_body(move || {
+                view! {
+                    <main role="alert">
+                        <p>{error}</p>
+                        <button on:click=move |_| { let _ = window().location().reload(); }>"Retry"</button>
+                    </main>
+                }
+            }),
+        }
+    });
 }
