@@ -20,7 +20,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  IRON_CANVAS_REF: b898b430d5251982079374bbd2f1a854caada60b
+  IRON_CANVAS_REF: 6236a6872cd90baf4280744f5331d4d84dde9c38
 
 jobs:
   # Native tests run in the separate iron-canvas repository.
