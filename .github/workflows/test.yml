@@ -39,6 +39,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install native renderer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libglib2.0-dev libcairo2-dev libpango1.0-dev libgtk-4-dev
+
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
@@ -85,6 +90,12 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack
+
+      - name: Install native renderer dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libglib2.0-dev libcairo2-dev libpango1.0-dev
 
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
