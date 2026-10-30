@@ -1,124 +1,139 @@
-//! Workbook-level lifecycle actions: switch, create, delete.
-//!
-//! These operations replace the loaded model entirely — unlike spreadsheet
-//! actions that mutate cells within it. Each also resets transient UI state
-//! (editing buffer, drag) so stale state doesn't bleed across workbooks.
+//! Workbook lifecycle operations await durable storage before replacing the model.
 
 use ironcalc_base::UserModel;
-use leptos::prelude::{UpdateValue, WithValue};
+use leptos::prelude::*;
 
 use crate::app_state::AppState;
 use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
-use crate::storage::{self, WorkbookId};
+use crate::storage::{self, WorkbookGroup, WorkbookId};
 
-/// Workbook-level lifecycle operations.
-///
-/// Separate from `SpreadsheetAction` because these replace the loaded model
-/// rather than mutate cells within it. Callers are responsible for any
-/// confirmation dialog before calling `Delete`.
 #[allow(clippy::large_enum_variant)]
 pub enum WorkbookAction {
-    /// Save the current workbook and load a different one.
     Switch(WorkbookId),
-    /// Save the current workbook and activate a fresh blank one.
     Create,
-    /// Delete a workbook. If it's active, load or create a replacement.
     Delete(WorkbookId),
-    /// Save the current workbook and activate `model` under a fresh UUID.
     Import(UserModel<'static>),
+    Share(UserModel<'static>),
+    Rename(WorkbookId, String),
+    Group(WorkbookId, WorkbookGroup),
+    Trust(WorkbookId),
 }
 
-/// Execute a [`WorkbookAction`], replacing the loaded model and resetting
-/// transient UI state.
+/// Ignore duplicate actions while storage is busy. The application also blocks input.
 pub fn execute_workbook(
     action: WorkbookAction,
     model: ModelStore,
     state: &WorkbookState,
     app: AppState,
 ) {
-    match action {
-        WorkbookAction::Switch(target_uuid) => {
-            let cur = state.current_uuid.get_untracked();
-            if cur == Some(target_uuid) {
-                return;
-            }
-            // Save the current workbook before switching. If encoding fails
-            // (e.g. model exceeds MAX_STORED_BYTES), warn the user instead of
-            // silently losing changes.
-            if let Some(uuid) = &cur {
-                let saved = model.with_value(|m| {
-                    let bytes = m.to_bytes();
-                    if bytes.len() > storage::MAX_STORED_BYTES {
-                        state.status.set(Some(StatusMessage::Error(format!(
-                            "Cannot save workbook — it exceeds the {} MB limit. \
-                             Delete some sheets or data before switching.",
-                            storage::MAX_STORED_BYTES / 1_000_000
-                        ))));
-                        return false;
-                    }
-                    storage::save(uuid, m);
-                    true
-                });
-                if !saved {
-                    return;
-                }
-            }
-            match storage::load(&target_uuid) {
-                Some(new_model) => activate(target_uuid, new_model, model, state),
-                None => {
-                    state.status.set(Some(StatusMessage::Error(
-                        "Cannot open workbook — it was saved with an older version. \
-                         Your data is still in browser storage but needs migration."
-                            .to_string(),
-                    )));
-                }
-            }
-        }
-        WorkbookAction::Create => {
-            if let Some(uuid) = state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
-            }
-            let (new_uuid, new_model) = storage::create_new();
-            activate(new_uuid, new_model, model, state);
-            app.bump_registry();
-        }
-        WorkbookAction::Delete(uuid) => {
-            let is_current = state.current_uuid.get_untracked() == Some(uuid);
-            storage::delete(&uuid);
-            if is_current {
-                match storage::load_selected() {
-                    Some((next_uuid, next_model)) => {
-                        activate(next_uuid, next_model, model, state);
-                    }
-                    None => {
-                        let (next_uuid, next_model) = storage::create_new();
-                        activate(next_uuid, next_model, model, state);
-                        state.status.set(Some(StatusMessage::Error(
-                            "Other workbooks could not be loaded after deletion. \
-                             Created a new blank workbook."
-                                .to_string(),
-                        )));
-                    }
-                }
-            }
-            app.bump_registry();
-        }
-        WorkbookAction::Import(new_model) => {
-            if let Some(uuid) = state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
-            }
-            let (new_uuid, new_model) =
-                storage::create_new_from(new_model, storage::WorkbookOrigin::FileImport);
-            activate(new_uuid, new_model, model, state);
-            app.bump_registry();
-        }
+    if app.storage_busy.get_untracked() {
+        return;
     }
+    app.storage_busy.set(true);
+    let state = *state;
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(error) = run_workbook(action, model, state, app).await {
+            state.status.set(Some(StatusMessage::Error(error)));
+        }
+        app.storage_busy.set(false);
+    });
 }
 
-// Common model-replacement sequence shared by all three operations:
-// load the new model, mark it selected in localStorage, update all reactive
-// state, and request a canvas repaint.
+async fn save_current(model: ModelStore, state: WorkbookState) -> Result<(), String> {
+    if let Some(uuid) = state.current_uuid.get_untracked() {
+        model
+            .with_value(|m| storage::snapshot(uuid, m))?
+            .save()
+            .await?;
+    }
+    Ok(())
+}
+
+/// The caller holds `storage_busy` until completion, including share-modal callers.
+pub async fn run_workbook(
+    action: WorkbookAction,
+    model: ModelStore,
+    state: WorkbookState,
+    app: AppState,
+) -> Result<(), String> {
+    let origin = if matches!(&action, WorkbookAction::Share(_)) {
+        storage::WorkbookOrigin::ShareLink
+    } else {
+        storage::WorkbookOrigin::FileImport
+    };
+    match action {
+        WorkbookAction::Switch(target) => {
+            if state.current_uuid.get_untracked() == Some(target) {
+                return Ok(());
+            }
+            save_current(model, state).await?;
+            let loaded = storage::load(&target).await?;
+            activate(target, loaded, model, &state);
+        }
+        WorkbookAction::Create => {
+            save_current(model, state).await?;
+            let (uuid, loaded) = storage::create_new().await?;
+            activate(uuid, loaded, model, &state);
+        }
+        WorkbookAction::Delete(uuid) => {
+            let current = state.current_uuid.get_untracked() == Some(uuid);
+            // Prepare a readable replacement before deleting the active record.
+            let replacement = if current {
+                let next = storage::load_registry()
+                    .keys()
+                    .filter(|id| **id != uuid)
+                    .min()
+                    .copied();
+                match next {
+                    Some(next) => Some((next, storage::load(&next).await?)),
+                    None => None,
+                }
+            } else {
+                None
+            };
+            if current && replacement.is_none() {
+                // If creation fails, the current workbook still exists.
+                let previous = storage::get_selected_uuid();
+                let (next, loaded) = storage::create_new().await?;
+                if let Err(error) = storage::delete(&uuid).await {
+                    if let Some(previous) = previous {
+                        storage::set_selected_uuid(&previous);
+                    }
+                    app.bump_registry();
+                    return Err(error);
+                }
+                activate(next, loaded, model, &state);
+            } else {
+                storage::delete(&uuid).await?;
+                if let Some((next, loaded)) = replacement {
+                    activate(next, loaded, model, &state);
+                }
+            }
+        }
+        WorkbookAction::Import(loaded) | WorkbookAction::Share(loaded) => {
+            save_current(model, state).await?;
+            let (uuid, loaded) = storage::create_new_from(loaded, origin).await?;
+            activate(uuid, loaded, model, &state);
+        }
+        WorkbookAction::Rename(uuid, name) => {
+            let name = storage::sanitize_name(&name);
+            // Save current edits first. Rename a detached model so a failed write cannot change the editor.
+            save_current(model, state).await?;
+            let mut renamed = storage::load(&uuid).await?;
+            renamed.set_name(&name);
+            storage::snapshot(uuid, &renamed)?.rename().await?;
+            if state.current_uuid.get_untracked() == Some(uuid) {
+                model.update_value(|m| m.set_name(&name));
+            }
+        }
+        WorkbookAction::Group(uuid, group) => storage::update_group(&uuid, group).await?,
+        WorkbookAction::Trust(uuid) => storage::promote_from_shared(&uuid).await?,
+    }
+    app.bump_registry();
+    Ok(())
+}
+
 fn activate(
     uuid: WorkbookId,
     new_model: UserModel<'static>,

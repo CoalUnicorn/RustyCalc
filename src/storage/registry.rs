@@ -1,16 +1,12 @@
 //! Workbook metadata registry and active-selection persistence.
 //!
-//! The registry is a `UUID -> WorkbookMeta` map stored under one localStorage
-//! key; model bytes themselves live elsewhere (see [`super::persist`]).
+//! IndexedDB owns the registry. The browser bridge caches committed metadata.
 
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{SELECTED_KEY, WorkbookId, log_err};
-
-// localStorage key for the UUID->metadata map, mirroring storage.ts.
-const MODELS_KEY: &str = "models";
+use super::{SELECTED_KEY, WorkbookId, database, log_err};
 
 /// Per-workbook metadata stored in the "models" registry.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -110,45 +106,41 @@ impl From<WorkbookGroup> for Option<String> {
 }
 
 /// Update the group label for a workbook in the registry.
-pub fn update_group(uuid: &WorkbookId, group: WorkbookGroup) {
-    let mut registry = load_registry();
-    if let Some(meta) = registry.get_mut(uuid) {
-        meta.group = group;
-    }
-    save_registry(&registry);
+pub async fn update_group(uuid: &WorkbookId, group: WorkbookGroup) -> Result<(), String> {
+    update_metadata(uuid, serde_json::json!({ "group": group })).await
 }
 
-pub fn update_name(uuid: &WorkbookId, name: &str) {
-    let mut registry = load_registry();
-    if let Some(meta) = registry.get_mut(uuid) {
-        meta.name = sanitize_name(name);
-    }
-    save_registry(&registry);
+pub async fn promote_from_shared(uuid: &WorkbookId) -> Result<(), String> {
+    update_metadata(uuid, serde_json::json!({ "shared_from_link": false })).await
 }
 
-// Registry helpers
+async fn update_metadata(uuid: &WorkbookId, patch: serde_json::Value) -> Result<(), String> {
+    database::update(&uuid.to_string(), &patch.to_string())
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            format!(
+                "Cannot update workbook metadata: {}",
+                database::error(error)
+            )
+        })
+}
 
-/// Load the UUID->metadata registry from localStorage.
-///
-/// Names are sanitized on the way out so any pre-sanitizer or share-imported
-/// entry can't leak control chars or bidi overrides into the sidebar.
+/// Read the committed metadata cache. Names are sanitized before display.
 pub fn load_registry() -> HashMap<WorkbookId, WorkbookMeta> {
-    let raw: HashMap<WorkbookId, WorkbookMeta> = LocalStorage::get(MODELS_KEY).unwrap_or_default();
+    let raw: HashMap<WorkbookId, WorkbookMeta> =
+        serde_json::from_str(&database::registry()).unwrap_or_default();
     raw.into_iter()
         .map(|(uuid, meta)| {
-            let cleaned = WorkbookMeta {
-                name: sanitize_name(&meta.name),
-                ..meta
-            };
-            (uuid, cleaned)
+            (
+                uuid,
+                WorkbookMeta {
+                    name: sanitize_name(&meta.name),
+                    ..meta
+                },
+            )
         })
         .collect()
-}
-
-/// Persist the registry map. `pub(super)` so [`super::persist`] can refresh
-/// metadata after a model write without exposing it as crate-public API.
-pub(super) fn save_registry(registry: &HashMap<WorkbookId, WorkbookMeta>) {
-    log_err(LocalStorage::set(MODELS_KEY, registry), "save registry");
 }
 
 // Selection helpers

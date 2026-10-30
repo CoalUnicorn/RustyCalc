@@ -2,8 +2,6 @@ use crate::components::chrome::left_drawer::LeftDrawer;
 use crate::components::panels::share_verify::ShareVerify;
 use crate::components::workbook::Workbook;
 
-use base64::Engine;
-use gloo_storage::Storage;
 use leptos::prelude::*;
 use leptos_use::{DebounceOptions, use_debounce_fn_with_options};
 
@@ -14,7 +12,7 @@ use crate::state::WorkbookState;
 use crate::storage;
 
 #[component]
-pub fn App() -> impl IntoView {
+pub fn App(initial: (storage::WorkbookId, ironcalc_base::UserModel<'static>)) -> impl IntoView {
     // `#share=...` URLs are always staged in-memory pending user consent —
     // never auto-persisted on first paint. Both V0 (no word) and V1 (word
     // verification) defer bitcode deserialization until after the recipient
@@ -27,7 +25,7 @@ pub fn App() -> impl IntoView {
     if let Some(load) = share_load {
         set_pending_share.set(Some(load));
     }
-    let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
+    let (uuid, model) = initial;
 
     let events = EventBus::new();
     // AppState owns the leptos-use color-mode handles internally; theme
@@ -50,11 +48,6 @@ pub fn App() -> impl IntoView {
     // fills the slot on mount and empties it on cleanup.
     let canvas_handle: CanvasHandle = StoredValue::new_local(None::<crate::scene::SceneHandle>);
 
-    // Pre-serialized model bytes refreshed by the debounced save. The
-    // beforeunload handler reads these directly, sidestepping a 10-50ms
-    // bitcode pass inside the browser's ~200ms unload budget.
-    let pre_serialized: StoredValue<Option<Vec<u8>>, LocalStorage> = StoredValue::new_local(None);
-
     provide_context(app_state);
     provide_context(wb_state);
     provide_context(model);
@@ -64,80 +57,101 @@ pub fn App() -> impl IntoView {
     provide_context(pending_share);
     provide_context(set_pending_share);
 
-    // Centralized auto-save via EventBus subscription.
-    //
-    // Every model mutation emits events for UI updates. This Effect subscribes
-    // to the three mutation categories (content, format, structure) and triggers
-    // a debounced save. Navigation and theme events are ephemeral — no persistence.
-    //
-    // Timing: 1s after last change, max 5s during continuous edits.
-    // Safety net: beforeunload saves unconditionally on tab close.
-    // Lifecycle: workbook switch saves the outgoing model synchronously
-    //            in input/workbook.rs before model replacement.
-    let debounced_save = use_debounce_fn_with_options(
-        move || {
-            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
-                return;
+    let generation = RwSignal::new(0u64);
+    let saved_generation = RwSignal::new(0u64);
+    let pending_writes = RwSignal::new(0u32);
+    let save_current = move || {
+        if app_state.storage_busy.get_untracked() {
+            return;
+        }
+        let Some(uuid) = wb_state.current_uuid.get_untracked() else {
+            return;
+        };
+        let version = generation.get_untracked();
+        let snapshot = model.with_value(|m| storage::snapshot(uuid, m));
+        pending_writes.update(|count| *count += 1);
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = match snapshot {
+                Ok(snapshot) => snapshot.save().await,
+                Err(error) => Err(error),
             };
-            model.with_value(|m| {
-                storage::save(&uuid, m);
-                web_sys::console::time_with_label("bitcode::to_bytes");
-                let bytes = m.to_bytes();
-                web_sys::console::time_end_with_label("bitcode::to_bytes");
-                pre_serialized.set_value(Some(bytes));
-            });
-        },
+            pending_writes.update(|count| *count -= 1);
+            match result {
+                Ok(()) => {
+                    if wb_state.current_uuid.get_untracked() == Some(uuid) {
+                        saved_generation.update(|saved| *saved = (*saved).max(version));
+                    }
+                }
+                Err(error) => wb_state
+                    .status
+                    .set(Some(crate::state::StatusMessage::Error(error))),
+            }
+        });
+    };
+    let debounced_save = use_debounce_fn_with_options(
+        save_current,
         1000.0,
         DebounceOptions::default().max_wait(Some(5000.0)),
     );
-
+    let save_after_operation = debounced_save.clone();
     Effect::new(move |_| {
         let has_content = !wb_state.events.content.get().is_empty();
         let has_format = !wb_state.events.format.get().is_empty();
         let has_structure = !wb_state.events.structure.get().is_empty();
         if has_content || has_format || has_structure {
+            generation.update(|value| *value += 1);
             debounced_save();
         }
     });
+    Effect::new(move |_| {
+        if !app_state.storage_busy.get()
+            && generation.get_untracked() != saved_generation.get_untracked()
+        {
+            save_after_operation();
+        }
+    });
 
-    // Emergency save on tab close — unconditional, cheap, runs rarely.
+    // Start a current snapshot while the page is still alive. Unload cannot await IndexedDB.
     {
         use wasm_bindgen::prelude::*;
-        let cb = Closure::<dyn Fn(web_sys::Event)>::new(move |_: web_sys::Event| {
-            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
-                return;
-            };
-            // Fast path: write the bytes the idle save already produced,
-            // bypassing a fresh bitcode pass. Registry was updated then too,
-            // so we only need to flush the model payload here.
-            if let Some(bytes) = pre_serialized.get_value() {
-                let mut full = Vec::with_capacity(5 + bytes.len());
-                full.extend_from_slice(b"RCAL");
-                full.push(1u8);
-                full.extend_from_slice(&bytes);
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
-                storage::log_err(
-                    gloo_storage::LocalStorage::set(uuid.to_string(), &encoded),
-                    "beforeunload save",
-                );
-            } else {
-                model.with_value(|m| storage::save(&uuid, m));
+        let hidden = Closure::<dyn Fn(web_sys::Event)>::new(move |_| {
+            if document().hidden() && generation.get_untracked() != saved_generation.get_untracked()
+            {
+                save_current();
             }
         });
-        if let Ok(win) =
-            window().add_event_listener_with_callback("beforeunload", cb.as_ref().unchecked_ref())
-        {
-            // Listener registered; intentionally leak the closure so it
-            // lives until page unload.
-            win
-        }
-        cb.forget();
+        let unload = Closure::<dyn Fn(web_sys::Event)>::new(move |event: web_sys::Event| {
+            if generation.get_untracked() != saved_generation.get_untracked()
+                || pending_writes.get_untracked() > 0
+                || app_state.storage_busy.get_untracked()
+            {
+                event.prevent_default();
+                let _ = js_sys::Reflect::set(event.as_ref(), &"returnValue".into(), &"".into());
+            }
+        });
+        let _ = document()
+            .add_event_listener_with_callback("visibilitychange", hidden.as_ref().unchecked_ref());
+        let _ = window()
+            .add_event_listener_with_callback("beforeunload", unload.as_ref().unchecked_ref());
+        let listeners = StoredValue::new_local((hidden, unload));
+        on_cleanup(move || {
+            listeners.with_value(|(hidden, unload)| {
+                let _ = document().remove_event_listener_with_callback(
+                    "visibilitychange",
+                    hidden.as_ref().unchecked_ref(),
+                );
+                let _ = window().remove_event_listener_with_callback(
+                    "beforeunload",
+                    unload.as_ref().unchecked_ref(),
+                );
+            })
+        });
     }
 
     // Row layout: collapsible drawer on the left, workbook editor fills the rest.
 
     view! {
-        <div id="app">
+        <div id="app" inert=move || app_state.storage_busy.get() aria-busy=move || app_state.storage_busy.get().to_string()>
             <LeftDrawer />
             <Workbook />
             <ShareVerify />

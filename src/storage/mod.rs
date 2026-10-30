@@ -1,4 +1,4 @@
-//! Workbook persistence: localStorage CRUD, metadata registry, and URL sharing.
+//! Workbook persistence: IndexedDB, metadata registry, and URL sharing.
 //!
 //! Split across [`registry`] (metadata + selection), [`persist`] (binary model
 //! CRUD), and [`share`] (base64 share-URL codec). This root holds the shared
@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+mod database;
+mod legacy;
 mod persist;
 mod registry;
 mod share;

@@ -30,7 +30,7 @@ RustyCalc is an alpha spreadsheet for web browsers. It compiles to WebAssembly. 
 - Excel-style keyboard navigation and shortcuts (arrows, Ctrl+arrow, Shift+arrow, Page Up/Down, Home/End, Ctrl+B/I/U, Ctrl+Z/Y)
 - Copy / paste (internal clipboard with structural paste, OS clipboard text fallback)
 - Light / dark theme with `localStorage` persistence; canvas reads `--palette-*` from CSS
-- Event-driven auto-save to `localStorage` (1 s debounce, 5 s maximum wait; immediate save on workbook switch)
+- Event-driven auto-save to IndexedDB (1 s debounce, 5 s maximum wait; workbook switches wait for the outgoing save). Existing localStorage workbooks migrate automatically.
 - Sidebar workbook list with groups; double-click to rename
 - Share links, with an optional verification word
 - Optional Tauri desktop shell, GitHub Pages deployment

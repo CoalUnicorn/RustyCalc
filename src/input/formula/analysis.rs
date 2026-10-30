@@ -484,7 +484,7 @@ fn ast_leaves(
         // (pushed as UnknownName). TableNameKind has no table support yet
         // in RustyCalc, so it rides along as Known for now.
         //
-        Node::DefinedNameKind((_, _, formula)) => {
+        Node::DefinedNameKind { formula, .. } => {
             ident_out.push(IdentLeaf::DefinedName(formula.clone()))
         }
         Node::TableNameKind(_) => ident_out.push(IdentLeaf::Known),

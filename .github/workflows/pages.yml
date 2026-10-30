@@ -22,9 +22,6 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-env:
-  IRON_CANVAS_REF: b898b430d5251982079374bbd2f1a854caada60b
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,31 +30,47 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          path: RustyCalc-main
+          path: main/RustyCalc
           submodules: recursive
 
       - name: Checkout dev
         uses: actions/checkout@v4
         with:
           ref: dev
-          path: RustyCalc-dev
+          path: dev/RustyCalc
           submodules: recursive
 
-      - name: Checkout iron-canvas
+      # Each branch declares its compatible canvas pin in its build workflow.
+      - name: Read branch canvas pins
+        id: canvas
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import pathlib
+          import re
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for branch in ("main", "dev"):
+                  workflow = pathlib.Path(branch, "RustyCalc/.github/workflows/rustycalc.yml")
+                  pins = re.findall(r"^  IRON_CANVAS_REF: ([0-9a-f]{40})$", workflow.read_text(), re.MULTILINE)
+                  if len(pins) != 1:
+                      raise SystemExit(f"Expected one pinned IRON_CANVAS_REF in {workflow}")
+                  output.write(f"{branch}={pins[0]}\n")
+          PYTHON
+
+      - name: Checkout main iron-canvas
         uses: actions/checkout@v4
         with:
           repository: CoalUnicorn/iron-canvas
-          ref: ${{ env.IRON_CANVAS_REF }}
-          path: iron-canvas
+          ref: ${{ steps.canvas.outputs.main }}
+          path: main/iron-canvas
 
-      # Both trees check out the same gitlink; fail loud if it drifts to an
-      # IronCalc commit lacking the wasm zip patch (breaks trunk build).
-      - name: Verify IronCalc wasm zip patch present
-        run: |
-          for d in RustyCalc-main RustyCalc-dev; do
-            grep -qF 'default-features = false, features = ["deflate"]' "$d/IronCalc/xlsx/Cargo.toml" \
-              || { echo "::error::$d: IronCalc/xlsx/Cargo.toml missing the wasm zip patch"; exit 1; }
-          done
+      - name: Checkout dev iron-canvas
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/iron-canvas
+          ref: ${{ steps.canvas.outputs.dev }}
+          path: dev/iron-canvas
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -70,10 +83,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            iron-canvas/target
-            RustyCalc-main/target
-            RustyCalc-dev/target
-          key: ${{ runner.os }}-pages-${{ hashFiles('iron-canvas/Cargo.lock', 'RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
+            main/RustyCalc/target
+            dev/RustyCalc/target
+          key: ${{ runner.os }}-pages-${{ hashFiles('main/**/Cargo.lock', 'dev/**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-pages-
 
       - name: Install Trunk
@@ -82,18 +94,18 @@ jobs:
           tool: trunk
 
       - name: Build main (/RustyCalc/)
-        working-directory: RustyCalc-main
+        working-directory: main/RustyCalc
         run: trunk build --release
 
       - name: Build dev (/RustyCalc/dev/)
-        working-directory: RustyCalc-dev
+        working-directory: dev/RustyCalc
         run: trunk build --release --public-url /RustyCalc/dev/
 
       - name: Assemble combined Pages tree
         run: |
           mkdir -p pages-dist
-          cp -r RustyCalc-main/dist/. pages-dist/
-          cp -r RustyCalc-dev/dist     pages-dist/dev
+          cp -r main/RustyCalc/dist/. pages-dist/
+          cp -r dev/RustyCalc/dist     pages-dist/dev
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
