@@ -54,7 +54,7 @@ fn test_my_feature() {
 | **Unit** | Pure functions (`CssColor::new`, `SafeFontFamily::from`) | None — assert directly |
 | **State** | `WorkbookState` signals, `DragState` transitions | `WorkbookState::new()` |
 | **Action** | `execute()` dispatch with model mutations | `Owner::new()` + `test_harness()` |
-| **Storage** | `localStorage` save/load roundtrip | Construct `UserModel`, call `save` / `load` |
+| **Storage** | IndexedDB migration, transactions, and workbook lifecycle | Run `node tests/browser/indexeddb.mjs` after `env -u NO_COLOR trunk build --locked` |
 | **Component** | Leptos `view!` mounts without panicking | `provide_context(state)` + `provide_context(model)` inside `Owner::new().with(...)` |
 
 A representative Action test using the harness:
@@ -127,7 +127,7 @@ mod tests {
 - **Use `test_harness()`** for all action/state tests — keeps setup uniform.
 - **Each test creates fresh state.** No shared mutables, no test ordering assumptions.
 - **Name the assertion**, not the index. `css_color_empty_input_defaults_to_black` beats `test1`.
-- **Clear `localStorage` at the top of storage tests** (`gloo_storage::LocalStorage::clear().ok();`) so prior runs can't leak state.
+- Use a fresh browser profile and isolated database names for storage tests. Do not clear a user's storage. The browser storage test creates its own profile.
 
 ## Debugging Tests
 

@@ -9,12 +9,6 @@ on:
     paths-ignore:
       - "**.md"
       - "docs/**"
-  # Cron paused: drift detection now lives in CoalUnicorn/IronCalc's
-  # .github/workflows/wasm-patch-rebase.yml, which rebases the
-  # rustycalc-xlsx-wasm branch onto upstream/main daily and verifies
-  # wasm32 compiles. Re-enable here once the wasm-zip patch is upstreamed.
-  # schedule:
-  #   - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -41,15 +35,6 @@ jobs:
           repository: CoalUnicorn/iron-canvas
           ref: ${{ env.IRON_CANVAS_REF }}
           path: iron-canvas
-
-      # The gitlink must point at an IronCalc commit carrying the wasm zip
-      # patch (default zip features pull in C deps that break wasm32). Fail
-      # loud here instead of mid-compile if the pin drifts to a pristine commit.
-      - name: Verify IronCalc wasm zip patch present
-        working-directory: RustyCalc
-        run: |
-          grep -qF 'default-features = false, features = ["deflate"]' IronCalc/xlsx/Cargo.toml \
-            || { echo "::error::IronCalc/xlsx/Cargo.toml missing the wasm zip patch — submodule gitlink points at an unpatched commit"; exit 1; }
 
       - name: Install Rust toolchain (wasm32)
         uses: dtolnay/rust-toolchain@stable

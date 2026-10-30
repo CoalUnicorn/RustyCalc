@@ -1,6 +1,6 @@
 //! Collapsible left sidebar showing all saved workbooks.
 //!
-//! Lists every workbook stored in the localStorage registry, optionally
+//! Lists every workbook stored in the IndexedDB registry, optionally
 //! grouped by `WorkbookMeta::group`.  Clicking a row saves the current
 //! workbook and loads the selected one.  The x button deletes a workbook.
 
@@ -73,7 +73,7 @@ pub fn LeftDrawer() -> impl IntoView {
         let registry = storage::load_registry();
 
         // Pre-compute existing group names once for all EntryRows,
-        // avoiding N localStorage deserializations for context menus.
+        // avoiding repeated metadata reads for context menus.
         let existing_groups: Vec<String> = {
             let mut groups: Vec<String> = registry
                 .values()
@@ -104,8 +104,7 @@ pub fn LeftDrawer() -> impl IntoView {
     };
 
     let assign_group = move |(uuid, group): (WorkbookId, WorkbookGroup)| {
-        storage::update_group(&uuid, group);
-        app.bump_registry();
+        execute_workbook(WorkbookAction::Group(uuid, group), model, &state, app);
     };
 
     let switch_workbook = move |target_uuid: WorkbookId| {
@@ -289,23 +288,7 @@ fn EntryRow(
 
     let on_rename_commit = Callback::new(move |new_name: String| {
         if !new_name.trim().is_empty() {
-            storage::update_name(&uuid, &new_name);
-            // Keep the in-memory model in sync so the next save() won't revert the name.
-            if state.current_uuid.get_untracked() == Some(uuid) {
-                model.update_value(|m| {
-                    m.set_name(&new_name);
-                    // Trigger save immediately — renaming doesn't emit
-                    // content/format/structure events that wake the autosave
-                    // Effect, so without this the rename lives in memory until
-                    // the next edit or beforeunload.
-                    storage::save(&uuid, m);
-                });
-            }
-            // Renaming is an explicit user action — clear the \"shared from link\"
-            // quarantine badge. We don't auto-promote on autosave anymore so the
-            // user must rename to signal trust.
-            storage::promote_from_shared(&uuid);
-            app.bump_registry();
+            execute_workbook(WorkbookAction::Rename(uuid, new_name), model, &state, app);
         }
         set_renaming.set(None);
     });
