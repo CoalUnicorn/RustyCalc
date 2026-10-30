@@ -7,7 +7,7 @@ use super::{LOCALE, SELECTED_KEY, WorkbookId, database};
 use gloo_storage::{LocalStorage, Storage};
 
 const STORAGE_MAGIC: &[u8; 4] = b"RCAL";
-const STORAGE_VERSION: u8 = 2;
+const STORAGE_VERSION: u8 = 3;
 /// Limit both serialization and parsing within the application's Wasm memory budget.
 pub const MAX_STORED_BYTES: usize = 64_000_000;
 
@@ -71,10 +71,16 @@ pub(super) fn decode(bytes: &[u8]) -> Result<UserModel<'static>, String> {
     if bytes.len() < 5 || &bytes[..4] != STORAGE_MAGIC {
         return Err("Invalid workbook header. Its saved data has been kept.".into());
     }
+    let from_workbook =
+        |workbook| ironcalc_base::Model::from_workbook(workbook, LOCALE).map(UserModel::from_model);
     let mut model = match bytes[4] {
-        1 => {
-            let workbook = super::legacy::decode(&bytes[5..])?;
-            ironcalc_base::Model::from_workbook(workbook, LOCALE).map(UserModel::from_model)
+        1 => super::legacy::decode_v1(&bytes[5..]).and_then(from_workbook),
+        2 => {
+            // The engine update briefly wrote the current layout with a v2 header.
+            match super::legacy::decode_v2(&bytes[5..]) {
+                Ok(workbook) => from_workbook(workbook),
+                Err(_) => UserModel::from_bytes(&bytes[5..], LOCALE),
+            }
         }
         STORAGE_VERSION => UserModel::from_bytes(&bytes[5..], LOCALE),
         _ => return Err("Unsupported workbook version. Its saved data has been kept.".into()),
@@ -180,25 +186,82 @@ mod tests {
     }
 
     #[test]
+    fn reads_v2_workbook_saved_before_views_were_removed() -> Result<(), String> {
+        let model = decode(include_bytes!("fixtures/legacy-7e6ae21c.rcal"))?;
+        assert_eq!(model.get_name(), "Legacy workbook");
+        assert_eq!(model.get_formatted_cell_value(0, 1, 1)?, "42");
+        assert_eq!(model.get_cell_content(0, 1, 2)?, "=A1*2");
+        assert_eq!(model.get_formatted_cell_value(0, 1, 2)?, "84");
+        assert_eq!(model.get_formatted_cell_value(0, 2, 1)?, "#DIV/0!");
+        assert_eq!(model.get_formatted_cell_value(0, 3, 1)?, "legacy text");
+        assert_eq!(model.get_formatted_cell_value(0, 1000, 26)?, "sparse cell");
+        assert_eq!(model.get_worksheets_properties().len(), 2);
+        assert_eq!(model.get_formatted_cell_value(1, 1, 1)?, "43");
+        assert!(model.get_cell_style(0, 1, 1)?.font.b);
+        assert_eq!(model.get_frozen_rows_count(0)?, 1);
+        assert!(!model.get_show_grid_lines(0)?);
+        assert_eq!(model.get_defined_name_list()[0].0, "answer");
+        assert_eq!(
+            model.get_cell_link(0, 3, 1)?,
+            Some(ironcalc_base::types::Link::External {
+                target: "https://example.com".into(),
+                tooltip: Some("Legacy link".into()),
+            })
+        );
+        assert_eq!(model.get_selected_view().sheet, 0);
+        assert_eq!(model.get_selected_view().row, 1);
+        Ok(())
+    }
+
+    #[test]
     fn rejects_invalid_envelopes() {
         assert!(decode(b"RCAL").is_err());
         assert!(decode(b"NOPE\x01").is_err());
-        assert!(decode(b"RCAL\x03").is_err());
+        assert!(decode(b"RCAL\x04").is_err());
         assert!(decode(b"RCAL\x01bad bitcode").is_err());
+        assert!(decode(b"RCAL\x02bad bitcode").is_err());
+        assert!(decode(b"RCAL\x03bad bitcode").is_err());
     }
 
     #[test]
     fn legacy_workbook_can_be_saved_in_the_new_format() -> Result<(), String> {
-        let mut model = decode(include_bytes!("fixtures/legacy-93f3407.rcal"))?;
-        model.set_user_input(0, 1, 1, "100")?;
-        let uuid = "550e8400-e29b-41d4-a716-446655440000"
-            .parse()
-            .map_err(|error| format!("Invalid fixture UUID: {error}"))?;
-        let saved = snapshot(uuid, &model)?;
-        assert_eq!(saved.bytes[4], 2);
-        let restored = decode(&saved.bytes)?;
-        assert_eq!(restored.get_formatted_cell_value(0, 1, 2)?, "200");
-        assert_eq!(restored.get_formatted_cell_value(0, 2, 1)?, "#DIV/0!");
+        for bytes in [
+            include_bytes!("fixtures/legacy-93f3407.rcal").as_slice(),
+            include_bytes!("fixtures/legacy-7e6ae21c.rcal").as_slice(),
+        ] {
+            let mut model = decode(bytes)?;
+            model.set_user_input(0, 1, 1, "100")?;
+            let uuid = "550e8400-e29b-41d4-a716-446655440000"
+                .parse()
+                .map_err(|error| format!("Invalid fixture UUID: {error}"))?;
+            let saved = snapshot(uuid, &model)?;
+            assert_eq!(saved.bytes[4], 3);
+            let restored = decode(&saved.bytes)?;
+            assert_eq!(restored.get_formatted_cell_value(0, 1, 2)?, "200");
+            assert_eq!(restored.get_formatted_cell_value(0, 2, 1)?, "#DIV/0!");
+            assert_eq!(restored.get_model().workbook, model.get_model().workbook);
+        }
         Ok(())
+    }
+
+    #[test]
+    fn reads_current_engine_workbook_with_temporary_v2_header() -> Result<(), String> {
+        let model = decode(include_bytes!("fixtures/legacy-7e6ae21c.rcal"))?;
+        let mut bytes = b"RCAL\x02".to_vec();
+        bytes.extend(model.to_bytes());
+        let restored = decode(&bytes)?;
+        assert_eq!(restored.get_model().workbook, model.get_model().workbook);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_truncated_v2_records_and_old_layout_with_v3_header() {
+        let bytes = include_bytes!("fixtures/legacy-7e6ae21c.rcal");
+        for end in 5..bytes.len() {
+            assert!(decode(&bytes[..end]).is_err(), "accepted {end} bytes");
+        }
+        let mut bytes = bytes.to_vec();
+        bytes[4] = 3;
+        assert!(decode(&bytes).is_err());
     }
 }
