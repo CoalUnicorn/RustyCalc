@@ -1,8 +1,7 @@
-//! Drag-mode enum and the formula-ref ghost-range overlay.
-
-use iron_canvas_web::RefZone;
+//! Drag-mode enum: at most one pointer gesture is active at a time.
 
 use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
+use iron_canvas::RefZone;
 
 /// Single enum ensures at most one drag mode is active — illegal
 /// combinations (e.g. selecting while resizing) are unrepresentable.
@@ -29,24 +28,13 @@ pub enum DragState {
         ref_node: RefNode,
         ref_text: TextRef,
     },
-    /// Formula-ref overlay drag. `anchor` is the ref's range at mousedown;
-    /// `grab_cell` is the cell under the cursor at mousedown. Mousemove
-    /// uses both to compute the new range per `zone` without frame-to-frame
-    /// state.
+    /// Drag a direct reference in the formula editor. `preview` drives the
+    /// live overlay; `anchor` and `grab_cell` keep the drag math stable.
     DraggingFormulaRef {
         ref_idx: usize,
         zone: RefZone,
         anchor: SheetRange,
         grab_cell: CellAddress,
+        preview: SheetRange,
     },
-}
-
-/// Live preview of a formula-ref drag: the ref index and the range the
-/// cursor currently resolves to. Mousemove publishes this; the worksheet
-/// memo patches `formula_refs[idx].sheet_area` with `range` so the painted
-/// outline follows the cursor without rewriting the formula text.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RefOverride {
-    pub idx: usize,
-    pub range: SheetRange,
 }

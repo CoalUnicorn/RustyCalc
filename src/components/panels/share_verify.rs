@@ -48,6 +48,7 @@ pub fn ShareVerify() -> impl IntoView {
         let (new_uuid, new_model) =
             storage::create_new_from(loaded, storage::WorkbookOrigin::ShareLink);
         model.update_value(|m| *m = new_model);
+        state.advance_workbook_generation();
         state.current_uuid.set(Some(new_uuid));
         state.reset_view_state();
         state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));

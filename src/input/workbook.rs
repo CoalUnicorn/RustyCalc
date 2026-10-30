@@ -126,6 +126,7 @@ fn activate(
     state: &WorkbookState,
 ) {
     model.update_value(|m| *m = new_model);
+    state.advance_workbook_generation();
     storage::set_selected_uuid(&uuid);
     state.current_uuid.set(Some(uuid));
     state.reset_view_state();

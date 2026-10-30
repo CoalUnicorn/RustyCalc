@@ -8,7 +8,14 @@ use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults,
 use crate::model::frontend_model::DefinedNameManager;
 use crate::model::{ActiveCellQuery, SheetRoster};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
-use iron_canvas_core::col_name;
+use ironcalc_base::expressions::utils::number_to_column;
+
+/// Excel-style column label for a 1-based index (`A`, `Z`, `AA`, ...).
+/// Out-of-range indices yield an empty label — the same fallback the legacy
+/// `col_name` helper used.
+fn column_label(col: i32) -> String {
+    number_to_column(col).unwrap_or_default()
+}
 
 /// The formula bar: cell address label + content/formula input.
 ///
@@ -36,12 +43,12 @@ pub fn FormulaBar() -> impl IntoView {
         // moves during point-mode reference selection, but the label must show
         // where the edit will be committed.
         if let Some(edit) = state.editing_cell.get() {
-            return format!("{}{}", col_name(edit.address.column), edit.address.row);
+            return format!("{}{}", column_label(edit.address.column), edit.address.row);
         }
         let _ = state.events.navigation.get();
         model.with_value(|m| {
             let ac = m.active_cell();
-            format!("{}{}", col_name(ac.column), ac.row)
+            format!("{}{}", column_label(ac.column), ac.row)
         })
     };
 

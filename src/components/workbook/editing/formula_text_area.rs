@@ -20,11 +20,81 @@ use wasm_bindgen::JsCast;
 
 use crate::components::workbook::editing::formula_overlay::FormulaOverlay;
 use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-use crate::input::mouse::CanvasHandle;
+use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::model::SheetRoster;
 use crate::model::frontend_model::DefinedNameManager;
+use crate::scene::SceneHandle;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
-use iron_canvas_core::PixelRect;
+use iron_canvas_core::{CellCoord, PixelRect, scene_geometry::GridRange};
+
+/// Pixel rectangle the in-cell editor must cover for the cell at
+/// `(row, column)`.
+///
+/// The editor covers the **logical** cell, not the physical slot: a merged
+/// anchor paints across the whole merged range, so boxing the editor around the
+/// anchor's own cell would leave the merge's text outside it. Two paths, both
+/// reading committed geometry so the box matches the pixels on screen:
+///
+/// 1. the cell's own slot is visible — `displayCellAt` at its centre answers
+///    with the logical cell's visible fragment, exact for merged and unmerged
+///    cells alike;
+/// 2. it is scrolled out of view (a merge taller than the viewport) — the
+///    engine's merged list gives the logical range, and the range's first
+///    visible fragment is the part still on screen, which is where the editor
+///    belongs.
+fn editor_rect(
+    handle: &SceneHandle,
+    model: &ModelStore,
+    sheet: u32,
+    row: i32,
+    column: i32,
+) -> Option<PixelRect> {
+    if let Some(own) = handle.cell_rect(row, column) {
+        let centre = own.center();
+        if let Some(cell) = handle.display_cell_at(centre)
+            && cell.physical == (CellCoord { row, col: column })
+        {
+            return Some(cell.fragment.rect);
+        }
+    }
+    handle
+        .visible_fragments(logical_range(model, sheet, row, column))
+        .into_iter()
+        .map(|fragment| fragment.rect)
+        .next()
+}
+
+/// The merged range containing `(row, column)`, or the single cell when the
+/// cell is not merged. Read from the engine's own merge list, so an editor whose
+/// anchor is scrolled out of view still resolves.
+fn logical_range(model: &ModelStore, sheet: u32, row: i32, column: i32) -> GridRange {
+    model.with_value(|m| {
+        m.get_merged_cells(sheet)
+            .ok()
+            .and_then(|merges| {
+                merges.into_iter().find(|mc| {
+                    row >= mc.row
+                        && row < mc.row + mc.height
+                        && column >= mc.column
+                        && column < mc.column + mc.width
+                })
+            })
+            .map(|mc| GridRange {
+                first: CellCoord {
+                    row: mc.row,
+                    col: mc.column,
+                },
+                last: CellCoord {
+                    row: mc.row + mc.height - 1,
+                    col: mc.column + mc.width - 1,
+                },
+            })
+            .unwrap_or(GridRange {
+                first: CellCoord { row, col: column },
+                last: CellCoord { row, col: column },
+            })
+    })
+}
 
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {
@@ -62,17 +132,19 @@ pub fn FormulaTextArea() -> impl IntoView {
         // Use the editing cell's address, not the live cursor. During point-mode
         // navigation the cursor moves to referenced cells, but the textarea must
         // stay anchored to the cell where the edit started.
-        let (row, column) = state
+        let (sheet, row, column) = state
             .editing_cell
             .get()
-            .map(|e| (e.address.row, e.address.column))
+            .map(|e| (e.address.sheet, e.address.row, e.address.column))
             .unwrap_or_else(|| {
                 let view = model.with_value(|m| m.get_selected_view());
-                (view.row, view.column)
+                (view.sheet, view.row, view.column)
             });
-        let rect = canvas_handle
-            .with_value(|slot| slot.as_ref().and_then(|ic| ic.cell_rect(row, column)))
-            .unwrap_or(PixelRect::default());
+        let rect = with_canvas(canvas_handle, model, state, |handle| {
+            editor_rect(handle, &model, sheet, row, column)
+        })
+        .flatten()
+        .unwrap_or(PixelRect::default());
         format!("{}", rect)
     };
 

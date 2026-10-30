@@ -32,11 +32,10 @@ pub fn splice_ref(text: &str, span: TextRef, ref_str: &str) -> (String, TextRef)
     )
 }
 
-/// Pure splice for a formula-ref drag drop. Builds the new ref text via
-/// `RefNode::with_area` (so `$`-flags and `Sheet!` prefix survive) and
-/// splices it into the formula at `span`. Returns `None` when the new
-/// range equals the original ref's resolved area — Excel's drop-on-
-/// origin silence — so callers can skip the no-op edit.
+/// Replace the dragged reference with its new range.
+///
+/// `RefNode::with_area` preserves absolute markers and sheet qualification.
+/// Return `None` when the pointer drops on the original range.
 pub fn splice_dragged_ref(
     text: &str,
     span: TextRef,
@@ -48,8 +47,8 @@ pub fn splice_dragged_ref(
         return None;
     }
     let new_node = original_ref.with_area(new_range, editing);
-    let new_str = new_node.to_localized(&editing.as_stringify_ctx());
-    Some(splice_ref(text, span, &new_str))
+    let new_text = new_node.to_localized(&editing.as_stringify_ctx());
+    Some(splice_ref(text, span, &new_text))
 }
 
 /// All state needed to evaluate a point-mode keypress, drawn from `EditingCell` and `DragState`.
@@ -134,5 +133,73 @@ pub fn try_point_move(ctx: &PointMoveCtx, key: &str, is_shift: bool) -> PointMov
         })
     } else {
         PointMoveOutcome::ExitPointing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coord::Absolute;
+
+    #[test]
+    fn dragged_ref_splice_keeps_absolute_flags_and_sheet_prefix() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 2,
+            column: 2,
+        };
+        let original = RefNode::range(
+            1,
+            Some("Sheet2".to_owned()),
+            3,
+            4,
+            Absolute {
+                row: true,
+                column: false,
+            },
+            5,
+            6,
+            Absolute {
+                row: false,
+                column: true,
+            },
+        );
+        let text = "=SUM(Sheet2!D$3:$F5)";
+        let span = TextRef {
+            start: 5,
+            end: text.len() - 1,
+        };
+
+        let (updated, _) = splice_dragged_ref(
+            text,
+            span,
+            &original,
+            SheetRange::new(1, 7, 8, 9, 10),
+            editing,
+        )
+        .expect("the range changed");
+
+        assert_eq!(updated, "=SUM(Sheet2!H$7:$J9)");
+    }
+
+    #[test]
+    fn dragged_ref_splice_is_a_noop_on_the_original_range() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 2,
+            column: 2,
+        };
+        let original = RefNode::from_cell_area(SheetRange::new(0, 3, 4, 5, 6), editing, "");
+
+        assert!(
+            splice_dragged_ref(
+                "=A1",
+                TextRef { start: 1, end: 3 },
+                &original,
+                SheetRange::new(0, 3, 4, 5, 6),
+                editing,
+            )
+            .is_none()
+        );
     }
 }

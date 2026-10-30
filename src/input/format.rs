@@ -6,7 +6,7 @@ use ironcalc_base::{
 };
 use leptos::prelude::WithValue;
 
-use crate::coord::{CellAddress, CellArea, SheetRange};
+use crate::coord::{CellAddress, CellArea, LAST_COLUMN, LAST_ROW, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
@@ -14,7 +14,6 @@ use crate::model::{
     style_types::{BooleanValue, BorderSide, BorderWeight, HexColor, StylePath},
     try_mutate,
 };
-use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 

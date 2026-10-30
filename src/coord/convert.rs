@@ -1,33 +1,10 @@
-//! Type conversions between RustyCalc coordinate types and ironcalc /
-//! iron-canvas types.
+//! Type conversions between RustyCalc coordinate types and the iron-canvas /
+//! ironcalc boundary types.
 
-use iron_canvas_core::address::{FormulaRef, RCRange, SheetArea};
+use iron_canvas_core::{CellCoord, scene_geometry::GridRange};
 use ironcalc_base::expressions::parser::DefinedNameS;
 
 use super::types::*;
-
-// --- ActiveRef -> FormulaRef ---
-
-impl From<ActiveRef> for FormulaRef {
-    fn from(a: ActiveRef) -> Self {
-        Self {
-            sheet_area: a.sheet_area.into(),
-            color_idx: a.color_idx,
-            kind: a.kind,
-        }
-    }
-}
-
-// --- SheetRange -> SheetArea ---
-
-impl From<SheetRange> for SheetArea {
-    fn from(s: SheetRange) -> Self {
-        Self {
-            sheet: s.sheet,
-            range: s.area.into(),
-        }
-    }
-}
 
 // --- CellArea conversions ---
 
@@ -54,13 +31,32 @@ impl From<CellArea> for [i32; 4] {
     }
 }
 
-impl From<CellArea> for RCRange {
+// --- CellArea <-> scene GridRange ---
+
+/// Scene geometry carries no sheet identity and requires ordered endpoints,
+/// so a possibly-inverted `CellArea` is normalized on the way in.
+impl From<CellArea> for GridRange {
     fn from(c: CellArea) -> Self {
         Self {
-            r1: c.r1,
-            c1: c.c1,
-            r2: c.r2,
-            c2: c.c2,
+            first: CellCoord {
+                row: c.r1.min(c.r2),
+                col: c.c1.min(c.c2),
+            },
+            last: CellCoord {
+                row: c.r1.max(c.r2),
+                col: c.c1.max(c.c2),
+            },
+        }
+    }
+}
+
+impl From<GridRange> for CellArea {
+    fn from(g: GridRange) -> Self {
+        Self {
+            r1: g.first.row,
+            c1: g.first.col,
+            r2: g.last.row,
+            c2: g.last.col,
         }
     }
 }

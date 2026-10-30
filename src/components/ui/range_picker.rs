@@ -23,10 +23,7 @@ use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
 pub enum RangeFormat {
     /// `B2:D8` — CF sqref.
     SheetRelative,
-    /// `Sheet1!$B$2:$D$8` — qualified-absolute form. The camera source-range
-    /// picker selects this so a cross-sheet re-point shows the sheet name (the
-    /// Named Range "refers to" field formats via `selection_a1_qualified_absolute`
-    /// directly instead, since it must re-run formula analysis).
+    /// `Sheet1!$B$2:$D$8` — qualified-absolute form for cross-sheet references.
     QualifiedAbsolute,
 }
 

@@ -45,8 +45,12 @@ pub enum AlignIcon {
 pub enum SheetIcon {
     Freeze,
     NamedRange,
-    Camera,
     Link,
+    Merge,
+    MergeCenter,
+    MergeAcross,
+    MergeDown,
+    Unmerge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,13 +144,30 @@ impl Glyph for SheetIcon {
             SheetIcon::NamedRange => {
                 r#"<path d="M21.4 11.6 12.4 2.6c-.36-.37-.86-.59-1.41-.59H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/>"#
             }
-            // Camera: body rectangle with lens circle and shutter notch.
-            SheetIcon::Camera => {
-                r#"<path d="M9 3 7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>"#
-            }
             // Link: two interlocking chain links.
             SheetIcon::Link => {
                 r#"<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h3V7H7a5 5 0 0 0 0 10h3v-1.9H7A3.1 3.1 0 0 1 3.9 12zm3.1 1h10v-2H7v2zm7-6h-3v1.9h3a3.1 3.1 0 0 1 0 6.2h-3V17h3a5 5 0 0 0 0-10z"/>"#
+            }
+            // Merge family: a cell frame plus the shape of the span it produces.
+            // Merge: one span across the frame.
+            SheetIcon::Merge => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM8 11h8v2H8z"/>"#
+            }
+            // MergeCenter: a shorter span, centered.
+            SheetIcon::MergeCenter => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM9 11h6v2H9z"/>"#
+            }
+            // MergeAcross: a vertical divider, one span per row.
+            SheetIcon::MergeAcross => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM11 8h2v8h-2z"/>"#
+            }
+            // MergeDown: a downward span.
+            SheetIcon::MergeDown => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM11 6h2v6h-2zM8 11l4 4 4-4z"/>"#
+            }
+            // Unmerge: the frame split back into four cells.
+            SheetIcon::Unmerge => {
+                r#"<path d="M3 4h8v7H3zM13 4h8v7h-8zM3 13h8v7H3zM13 13h8v7h-8z"/>"#
             }
         }
     }
@@ -261,13 +282,8 @@ impl AlignIcon {
 
 #[cfg(test)]
 impl SheetIcon {
-    pub fn all() -> [SheetIcon; 4] {
-        [
-            SheetIcon::Freeze,
-            SheetIcon::NamedRange,
-            SheetIcon::Camera,
-            SheetIcon::Link,
-        ]
+    pub fn all() -> [SheetIcon; 3] {
+        [SheetIcon::Freeze, SheetIcon::NamedRange, SheetIcon::Link]
     }
 }
 

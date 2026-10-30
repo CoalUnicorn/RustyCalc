@@ -29,13 +29,6 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
         self.0.get_untracked()
     }
 
-    /// Reads the inner value via a closure. Stable primitive API;
-    /// kept for potential external consumers that prefer the `with`
-    /// pattern over `get()`.
-    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        self.0.with(f)
-    }
-
     pub fn with_untracked<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         self.0.with_untracked(f)
     }

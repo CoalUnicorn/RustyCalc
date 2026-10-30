@@ -22,6 +22,9 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  IRON_CANVAS_REF: b898b430d5251982079374bbd2f1a854caada60b
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -39,6 +42,13 @@ jobs:
           ref: dev
           path: RustyCalc-dev
           submodules: recursive
+
+      - name: Checkout iron-canvas
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/iron-canvas
+          ref: ${{ env.IRON_CANVAS_REF }}
+          path: iron-canvas
 
       # Both trees check out the same gitlink; fail loud if it drifts to an
       # IronCalc commit lacking the wasm zip patch (breaks trunk build).
@@ -60,9 +70,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            iron-canvas/target
             RustyCalc-main/target
             RustyCalc-dev/target
-          key: ${{ runner.os }}-pages-${{ hashFiles('RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
+          key: ${{ runner.os }}-pages-${{ hashFiles('iron-canvas/Cargo.lock', 'RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-pages-
 
       - name: Install Trunk
@@ -76,7 +87,7 @@ jobs:
 
       - name: Build dev (/RustyCalc/dev/)
         working-directory: RustyCalc-dev
-        run: trunk build --release --public-url /RustyCalc/dev/ --features dev-tools
+        run: trunk build --release --public-url /RustyCalc/dev/
 
       - name: Assemble combined Pages tree
         run: |

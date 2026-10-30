@@ -2,6 +2,19 @@
 
 use wasm_bindgen::JsCast;
 
+// Time
+
+/// Current time from `performance.now()` — milliseconds since page load.
+///
+/// Stamps the workbook registry's `modified` field. Sub-millisecond
+/// resolution keeps two saves in the same session ordered.
+pub fn now_ms() -> f64 {
+    leptos::prelude::window()
+        .performance()
+        .map(|performance| performance.now())
+        .unwrap_or(0.0)
+}
+
 // Focus management
 
 /// Move keyboard focus back to the `#workbook` container.

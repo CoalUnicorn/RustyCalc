@@ -22,9 +22,9 @@ pub async fn read_file_bytes(file: web_sys::File) -> Result<Vec<u8>, String> {
 /// Trigger a browser download of `bytes` with the given `filename`.
 ///
 /// `mime` overrides the Blob `type:` attribute; passing `None` keeps the legacy
-/// xlsx MIME (preserves drop-target hints for spreadsheet workflows). Pass
-/// `Some("application/octet-stream")` for opaque binary artifacts such as
-/// `.icr` paint-level recordings.
+/// xlsx MIME (preserves drop-target hints for spreadsheet workflows). Pass the
+/// document's own type — `image/svg+xml` or `application/pdf` — for the canvas
+/// snapshots.
 ///
 /// Returns `Ok(())` on success or an error string suitable for display.
 pub fn trigger_download(bytes: &[u8], filename: &str, mime: Option<&str>) -> Result<(), String> {

@@ -48,7 +48,7 @@ pub fn save(uuid: &WorkbookId, model: &UserModel) {
                 .get(uuid)
                 .map(|m| m.group.clone())
                 .unwrap_or_default(),
-            modified: crate::perf::now(),
+            modified: crate::util::now_ms(),
             // Preserve the shared_from_link flag if it was set, don't clear
             // it on save — it gets cleared explicitly by promote_from_shared.
             shared_from_link: registry

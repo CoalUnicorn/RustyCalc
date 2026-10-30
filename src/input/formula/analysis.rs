@@ -120,7 +120,7 @@ pub(crate) enum RefLeaf {
 pub(crate) enum IdentLeaf {
     Known,
     /// Resolved defined name. Carries the definition formula (e.g. `"Sheet1!$B$5"`)
-    /// so `analyze_formula` can re-parse it and emit a `FormulaRef` for the ident span.
+    /// so `analyze_formula` can re-parse it and emit an `ActiveRef` for the ident span.
     DefinedName(String),
     UnknownFunction,
     UnknownName,
@@ -138,7 +138,7 @@ pub(crate) enum DiagnosticLeaf {
 ///
 /// - `active_cell` — the cell being edited. Its `sheet` drives cross-sheet
 ///   ref resolution; its `row` / `column` drive `RefNode::area` when projecting
-///   each resolved ref to the `SheetArea` cached on `FormulaRef` — ironcalc
+///   each resolved ref to the `SheetRange` cached on `ActiveRef` — ironcalc
 ///   stores relative coordinates as offsets from the stringify ctx, so the
 ///   editing cell is required to recover absolute coords.
 /// - `sheet_names` — `(sheet_index, display_name)` pairs for cross-sheet ref resolution.
@@ -215,7 +215,7 @@ pub fn analyze_formula(
     // Parser context = the editing cell. Nodes encode relative coords as
     // offsets from this ctx; `RefNode::area(&active_cell)` reverses the math
     // to recover absolute 1-based coords for the `sheet_area` projection. Keeping
-    // the ctx and the projection base in lockstep is what lets `FormulaRef.ref_node`
+    // the ctx and the projection base in lockstep is what lets `ActiveRef.ref_node`
     // round-trip through `RefNode::to_localized` without a separate conversion.
     let context = CellReferenceRC {
         sheet: active_sheet_name,
@@ -249,7 +249,7 @@ pub fn analyze_formula(
     for (leaf, span) in ref_leaves.iter().zip(ref_range_token_spans.iter().copied()) {
         match leaf {
             RefLeaf::Resolved(ref_node) => {
-                // Project to SheetArea once so the renderer hot path is a
+                // Project to SheetRange once so the renderer hot path is a
                 // plain field read. Parser resolved to absolute coords
                 // (context (0,0) above), so `active_cell` here is only used
                 // for the relative-offset math in `RefNode::area`.
